@@ -24,7 +24,7 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className="min-h-screen flex flex-col bg-[#060d17] text-slate-100 antialiased selection:bg-sky-500/30 selection:text-sky-200">
         <Navbar />
-        <main className="flex-1 w-full">{children}</main>
+        <main id="main-content" className="flex-1 w-full">{children}</main>
         <Footer />
       </body>
     </html>

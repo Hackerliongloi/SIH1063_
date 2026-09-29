@@ -280,7 +280,7 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
     d=Draft(kind=(payload.get("formats") or ["article"])[0],title=title,body_md=body,tone=payload.get("tone","general_public"),status="draft",created_by=u.id);db.add(d);db.flush()
     for item in citation_rows:db.add(DraftCitation(draft_id=d.id,claim_text=item.get("claim_text",item.get("text", "")[:350]),chunk_id=item["chunk_id"],asset_id=item["asset_id"],span_text=item.get("span_text",item.get("text","")[:500]),supported=True))
     db.commit();db.refresh(d)
-    return {**serialize_draft(d),"provider":settings.llm_provider,"notice":"Draft is grounded in selected source chunks and citation spans were validated.","citations_count":len(citation_rows)}
+    return {**serialize_draft(d),"provider":settings.llm_provider,"notice":"Draft is grounded in selected source chunks and citation spans were validated.","citations_count":len(citation_rows),"citations":[{"claim_text":x.get("claim_text",x.get("text","" )[:350]),"chunk_id":x["chunk_id"],"asset_id":x["asset_id"],"span_text":x.get("span_text",x.get("text","" )[:500]),"supported":True} for x in citation_rows]}
 @app.get("/api/config")
 def get_config(db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):return {x.key:x.value_json for x in db.scalars(select(PortalConfig))}
 @app.put("/api/config/{key}")

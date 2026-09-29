@@ -149,24 +149,35 @@ export async function fetchFromAPI(endpoint: string, options?: RequestInit) {
   }
 }
 
+function listFromResponse(value: unknown): any[] {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") {
+    const response = value as { items?: unknown; results?: unknown };
+    if (Array.isArray(response.items)) return response.items;
+    if (Array.isArray(response.results)) return response.results;
+  }
+  return [];
+}
+
 export const api = {
   // Expeditions
   getExpeditions: () => fetchFromAPI("/expeditions"),
   getExpedition: (id: string) => fetchFromAPI(`/expeditions/${id}`),
 
   // Assets
-  getAssets: (params?: { type?: string; expedition_id?: string; region?: string; year?: number }) => {
+  getAssets: async (params?: { type?: string; expedition_id?: string; region?: string; year?: number }) => {
     const q = new URLSearchParams();
     if (params?.type) q.append("type", params.type);
     if (params?.expedition_id) q.append("expedition_id", params.expedition_id);
     if (params?.region) q.append("region", params.region);
     if (params?.year) q.append("year", params.year.toString());
-    return fetchFromAPI(`/assets?${q.toString()}`);
+    const response = await fetchFromAPI(`/assets?${q.toString()}`);
+    return listFromResponse(response);
   },
   getAsset: (id: string) => fetchFromAPI(`/assets/${id}`),
 
   // Hybrid Search
-  search: (params: {
+  search: async (params: {
     q?: string;
     type?: string;
     expedition?: string;
@@ -187,20 +198,38 @@ export const api = {
     if (params.tags) q.append("tags", params.tags);
     if (params.sort) q.append("sort", params.sort);
     if (params.page) q.append("page", params.page.toString());
-    return fetchFromAPI(`/search?${q.toString()}`);
+    const response = await fetchFromAPI(`/search?${q.toString()}`);
+    return {
+      ...response,
+      results: listFromResponse(response),
+      total: response?.total ?? listFromResponse(response).length,
+    };
   },
 
   // Image search
-  searchImages: (query: string) => fetchFromAPI(`/search/images?q=${encodeURIComponent(query)}`),
+  searchImages: async (query: string) => {
+    const response = await fetchFromAPI(`/search/images?q=${encodeURIComponent(query)}`);
+    return {
+      ...response,
+      results: listFromResponse(response),
+      total: response?.total ?? listFromResponse(response).length,
+    };
+  },
 
   // Grounded Generation
-  generateContent: (payload: {
+  generateContent: async (payload: {
     asset_ids?: string[];
     expedition_id?: string;
     theme?: string;
     formats: string[];
     tone: string;
-  }) => fetchFromAPI("/generate", { method: "POST", body: JSON.stringify(payload) }),
+  }) => {
+    const result = await fetchFromAPI("/generate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    return Array.isArray(result) ? result : result ? [result] : [];
+  },
 
   // Editorial
   getDrafts: (params?: { status?: string; kind?: string }) => {
@@ -218,7 +247,7 @@ export const api = {
   ) =>
     fetchFromAPI(`/editorial/drafts/${id}/transition`, {
       method: "POST",
-      body: JSON.stringify({ action, comment, scheduled_at }),
+      body: JSON.stringify({ action: action === "resubmit" ? "submit" : action, comment, scheduled_at }),
     }),
   getCalendar: (month?: string) => fetchFromAPI(`/editorial/calendar${month ? `?month=${month}` : ""}`),
 

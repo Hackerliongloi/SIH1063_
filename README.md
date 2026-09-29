@@ -7,7 +7,7 @@ A FastAPI modular monolith for the Polar science archive, editorial workflow, an
 - FastAPI, SQLAlchemy, Alembic, and Uvicorn
 - PostgreSQL 16 with pgvector vectors, HNSW indexes, and a GIN full-text index; SQLite stores vectors as JSON for lightweight local development
 - Redis + RQ for retryable ingestion jobs
-- MinIO for S3-compatible object storage
+- RustFS for self-hosted S3-compatible object storage
 - Local deterministic embeddings by default; no paid AI or storage services are called
 - Optional Ollama can provide local embeddings and grounded local LLM drafts by setting `LLM_PROVIDER=ollama`, `MODEL_BASE_URL`, and `MODEL_NAME`
 
@@ -15,14 +15,14 @@ A FastAPI modular monolith for the Polar science archive, editorial workflow, an
 
 1. Copy `.env.example` to `.env` and replace `SECRET_KEY`, `ADMIN_PASSWORD`, `POSTGRES_PASSWORD`, and storage credentials before exposing this beyond localhost.
 2. Start the stack: `docker compose -f infra/docker-compose.yml up --build`.
-3. Open the site at `http://localhost:3000`, API docs at `http://localhost:8000/docs`, and MinIO console at `http://localhost:9001`.
+3. Open the site at `http://localhost:3000`, API docs at `http://localhost:8000/docs`, and the RustFS console at `http://localhost:9001`.
 4. First admin login uses the configured `ADMIN_EMAIL` and `ADMIN_PASSWORD` (defaults are for local development only).
 
-Database schema upgrades run through Alembic at API startup. Persistent volumes hold Postgres, Redis, and MinIO data. Keep backups of those volumes in any real deployment.
+Database schema upgrades run through Alembic at API startup. Persistent volumes hold Postgres, Redis, and RustFS data. Keep backups of those volumes in any real deployment.
 
 ## Run API without containers
 
-Use Python 3.12+, create a virtual environment, install `requirements.txt`, then configure `DATABASE_URL=sqlite:///./polar.db`, `REDIS_URL`, storage settings, and `API_PROXY_TARGET=http://localhost:8000`. Run the API from `backend/` with `uvicorn app.main:app --reload --app-dir ..`, then start the frontend in another terminal with `npm run dev`. Redis and MinIO are optional for development: uploads fall back to local `backend/media` storage and ingestion runs inline when RQ is unavailable.
+Use Python 3.12+, create a virtual environment, install `requirements.txt`, then configure `DATABASE_URL=sqlite:///./polar.db`, `REDIS_URL`, storage settings, and `API_PROXY_TARGET=http://localhost:8000`. Run the API from `backend/` with `uvicorn app.main:app --reload --app-dir ..`, then start the frontend in another terminal with `npm run dev`. Redis and RustFS are optional for development: uploads fall back to local `backend/media` storage and ingestion runs inline when RQ is unavailable.
 
 ## API areas
 

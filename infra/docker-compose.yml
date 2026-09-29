@@ -23,14 +23,39 @@ services:
       timeout: 3s
       retries: 20
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: server /data --console-address ":9001"
+    image: rustfs/rustfs:latest
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-polar}
-      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-polar-local-secret}
+      RUSTFS_VOLUMES: /data/rustfs{0...3}
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-polar}
+      RUSTFS_SECRET_KEY: ${STORAGE_SECRET_KEY:-polar-local-secret}
+      RUSTFS_UNSAFE_BYPASS_DISK_CHECK: "true"
     ports: ["9000:9000", "9001:9001"]
-    volumes: ["minio_data:/data"]
+    volumes:
+      - rustfs_data_0:/data/rustfs0
+      - rustfs_data_1:/data/rustfs1
+      - rustfs_data_2:/data/rustfs2
+      - rustfs_data_3:/data/rustfs3
+    depends_on:
+      volume-permission-helper: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+  volume-permission-helper:
+    image: alpine:3.21
+    command: ["sh", "-c", "chown -R 10001:10001 /data0 /data1 /data2 /data3"]
+    volumes:
+      - rustfs_data_0:/data0
+      - rustfs_data_1:/data1
+      - rustfs_data_2:/data2
+      - rustfs_data_3:/data3
+    restart: "no"
   api:
     build: { context: .., dockerfile: backend/Dockerfile }
     restart: unless-stopped
@@ -41,10 +66,16 @@ services:
       STORAGE_ENDPOINT: http://minio:9000
     ports: ["8000:8000"]
     volumes: ["media_data:/srv/backend/media"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-      minio: { condition: service_started }
+      minio: { condition: service_healthy }
   worker:
     build: { context: .., dockerfile: backend/Dockerfile }
     restart: unless-stopped
@@ -58,7 +89,8 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-      minio: { condition: service_started }
+      minio: { condition: service_healthy }
+      api: { condition: service_healthy }
   web:
     build: { context: .., dockerfile: infra/web.Dockerfile }
     restart: unless-stopped
@@ -70,5 +102,8 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  minio_data:
+  rustfs_data_0:
+  rustfs_data_1:
+  rustfs_data_2:
+  rustfs_data_3:
   media_data:

@@ -1,121 +1,23 @@
 import Link from "next/link";
-import { Compass, ShieldCheck, Globe, Database, FileText, ExternalLink } from "lucide-react";
+import { ArrowUpRight, Mail, MapPin } from "lucide-react";
+import { navigationGroups } from "@/lib/site-content";
 
 export default function Footer() {
   return (
-    <footer className="border-t border-[#18293d] bg-[#040911] text-slate-400 text-sm mt-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-12">
-          {/* Institutional Info */}
-          <div className="space-y-3 md:col-span-1">
-            <div className="flex items-center gap-2 text-white font-bold text-base tracking-tight">
-              <span>POLAR PORTAL</span>
-              <span className="text-[10px] font-mono bg-sky-950 text-sky-400 px-1.5 py-0.5 rounded border border-sky-800">
-                MoES
-              </span>
-            </div>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              National Centre for Polar and Ocean Research (NCPOR), Ministry of Earth Sciences, Government of India.
-              Headquartered at Headland Sada, Vasco-da-Gama, Goa - 403804.
-            </p>
-            <div className="pt-2 flex items-center gap-2 text-xs font-mono text-emerald-400">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Antarctic Treaty CEP Annex III Compliant</span>
-            </div>
-          </div>
-
-          {/* Expeditions & Stations */}
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300 font-mono mb-3">
-              Research Stations
-            </h4>
-            <ul className="space-y-2 text-xs">
-              <li className="flex justify-between">
-                <span className="text-slate-300">Maitri (Antarctica)</span>
-                <span className="font-mono text-slate-300">Est. 1989</span>
-              </li>
-              <li className="flex justify-between">
-                <span className="text-slate-300">Bharati (Antarctica)</span>
-                <span className="font-mono text-slate-300">Est. 2012</span>
-              </li>
-              <li className="flex justify-between">
-                <span className="text-slate-300">Himadri (Arctic Svalbard)</span>
-                <span className="font-mono text-slate-300">Est. 2008</span>
-              </li>
-              <li className="flex justify-between">
-                <span className="text-slate-300">Himansh (Spiti Himalaya)</span>
-                <span className="font-mono text-slate-300">Est. 2016</span>
-              </li>
-              <li className="flex justify-between">
-                <span className="text-slate-300">Dakshin Gangotri Memorial</span>
-                <span className="font-mono text-slate-300">Est. 1983</span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Quick Links */}
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300 font-mono mb-3">
-              Knowledge Repository
-            </h4>
-            <ul className="space-y-2 text-xs">
-              <li>
-                <Link href="/explore?type=report" className="hover:text-sky-300 transition-colors">
-                  Winterover Technical Reports
-                </Link>
-              </li>
-              <li>
-                <Link href="/explore?type=dataset" className="hover:text-sky-300 transition-colors">
-                  Fjord CTD & Limnology Datasets
-                </Link>
-              </li>
-              <li>
-                <Link href="/explore?type=publication" className="hover:text-sky-300 transition-colors">
-                  Peer-Reviewed Polar Publications
-                </Link>
-              </li>
-              <li>
-                <Link href="/explore?type=photo" className="hover:text-sky-300 transition-colors">
-                  CLIP Semantic Image Archive
-                </Link>
-              </li>
-              <li>
-                <Link href="/stories" className="hover:text-sky-300 transition-colors">
-                  Grounded Outreach Stories
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          {/* System Transparency */}
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300 font-mono mb-3">
-              System Architecture
-            </h4>
-            <p className="text-xs text-slate-400 mb-3 leading-relaxed">
-              FastAPI Modular Monolith with strict Pydantic contracts, hybrid ranking (BM25 + 384d vector + recency), and grounded generation with verbatim citation validation.
-            </p>
-            <div className="flex flex-wrap gap-1.5 font-mono text-[10px]">
-              <span className="bg-[#0b1726] border border-[#1b3149] px-2 py-0.5 rounded text-sky-300">
-                FastAPI
-              </span>
-              <span className="bg-[#0b1726] border border-[#1b3149] px-2 py-0.5 rounded text-teal-300">
-                Next.js Mobile-First
-              </span>
-              <span className="bg-[#0b1726] border border-[#1b3149] px-2 py-0.5 rounded text-indigo-300">
-                C1..Cn Grounding
-              </span>
-            </div>
-          </div>
+    <footer className="bg-[#102f4c] text-white">
+      <div className="mx-auto grid max-w-7xl gap-9 px-4 py-10 sm:px-6 md:grid-cols-2 lg:grid-cols-[1.25fr_1fr_1fr_1fr] lg:px-8 lg:py-12">
+        <div>
+          <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-full border border-white/50 text-[9px] font-bold">NCPOR</div><div><p className="text-sm font-bold">National Centre for Polar and Ocean Research</p><p className="mt-0.5 text-xs text-sky-100/75">Ministry of Earth Sciences · Government of India</p></div></div>
+          <p className="mt-4 max-w-sm text-sm leading-6 text-white/75">Advancing research in the polar regions, the Southern Ocean and the high Himalaya.</p>
+          <p className="mt-4 flex items-start gap-2 text-xs leading-5 text-white/70"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-sky-200" />Headland Sada, Vasco-da-Gama, Goa 403 804, India</p>
+          <a href="mailto:info@ncpor.res.in" className="mt-2 inline-flex items-center gap-2 text-xs text-sky-100 hover:underline"><Mail className="h-3.5 w-3.5" />info@ncpor.res.in</a>
         </div>
-
-        <div className="pt-8 border-t border-[#142334] flex flex-col sm:flex-row items-center justify-between text-xs text-slate-300 gap-4">
-          <p>© 2024 National Centre for Polar and Ocean Research, Ministry of Earth Sciences, Govt. of India.</p>
-          <div className="flex items-center gap-6">
-            <Link href="/about" className="hover:text-slate-300">Scientific Disclaimer</Link>
-            <Link href="/about" className="hover:text-slate-300">Open Access License</Link>
-            <Link href="/about" className="hover:text-slate-300">Contact NCPOR Goa</Link>
-          </div>
+        {navigationGroups.slice(0, 3).map((group) => <div key={group.label}><h2 className="text-xs font-bold uppercase tracking-[0.13em] text-sky-100">{group.label}</h2><ul className="mt-4 space-y-2">{group.links.slice(0, 6).map((item) => <li key={item.href}><Link href={item.href} className="text-sm text-white/75 hover:text-white hover:underline">{item.label}</Link></li>)}</ul></div>)}
+      </div>
+      <div className="border-t border-white/15">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 text-xs text-white/70 sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
+          <p>© National Centre for Polar and Ocean Research · Ministry of Earth Sciences, Government of India</p>
+          <nav aria-label="Policies and help" className="flex flex-wrap gap-x-4 gap-y-2"><Link href="/institution/disclaimer" className="hover:text-white">Disclaimer</Link><Link href="/institution/copyright" className="hover:text-white">Copyright policy</Link><Link href="/accessibility" className="hover:text-white">Accessibility</Link><Link href="/sitemap" className="hover:text-white">Sitemap</Link><Link href="/rss.xml" className="inline-flex items-center gap-1 hover:text-white">RSS feed <ArrowUpRight className="h-3 w-3" /></Link></nav>
         </div>
       </div>
     </footer>

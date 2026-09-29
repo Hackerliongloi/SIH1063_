@@ -8,7 +8,7 @@ from .config import settings
 from .db import get_db
 from ..models import User
 
-pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
 oauth = HTTPBearer(auto_error=False)
 def hash_password(value): return pwd.hash(value)
 def verify_password(value, hashed):
