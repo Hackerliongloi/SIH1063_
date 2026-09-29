@@ -12,6 +12,27 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileGroup, setMobileGroup] = useState<string | null>(null);
   const [textSize, setTextSize] = useState(100);
+  const [sessionRole, setSessionRole] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    let active = true;
+    const refreshSession = async () => {
+      try {
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
+        const session = response.ok ? await response.json() : null;
+        if (active) setSessionRole(session?.role || null);
+      } catch {
+        if (active) setSessionRole(null);
+      }
+    };
+    const handleAuthChange = () => { void refreshSession(); };
+    void refreshSession();
+    window.addEventListener("polar-auth-changed", handleAuthChange);
+    return () => {
+      active = false;
+      window.removeEventListener("polar-auth-changed", handleAuthChange);
+    };
+  }, []);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -56,7 +77,7 @@ export default function Navbar() {
         </Link>
         <div className="hidden shrink-0 items-center gap-4 lg:flex">
           <Link href="/news" className="text-sm font-medium text-slate-600 hover:text-[#12679a]">News and updates</Link>
-          <Link href="/login" className="text-sm font-medium text-slate-600 hover:text-[#12679a]">Staff sign in</Link>
+          {sessionRole ? <Link href={sessionRole === "reviewer" ? "/admin/editorial" : sessionRole === "viewer" ? "/" : "/admin/content"} className="text-sm font-medium text-slate-600 hover:text-[#12679a]">Portal workspace</Link> : sessionRole === null ? <Link href="/login" className="text-sm font-medium text-slate-600 hover:text-[#12679a]">Staff sign in</Link> : null}
           <Link href="/explore" className="inline-flex items-center gap-2 rounded-lg bg-[#12679a] px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0d527d]">
             <Search className="h-4 w-4" />Search research
           </Link>
@@ -116,7 +137,7 @@ export default function Navbar() {
             </section>
           ))}
           <div className="grid grid-cols-2 gap-1 border-t border-slate-100 pt-2">
-            {[{ label: "Tenders", href: "/tenders" }, { label: "Careers", href: "/careers" }, { label: "News and updates", href: "/news" }, { label: "Photo gallery", href: "/gallery" }, { label: "Science stories", href: "/stories" }, { label: "Staff sign in", href: "/login" }].map((item) => <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className="rounded-lg px-3 py-3 text-sm text-slate-700 hover:bg-sky-50">{item.label}</Link>)}
+            {[{ label: "Tenders", href: "/tenders" }, { label: "Careers", href: "/careers" }, { label: "News and updates", href: "/news" }, { label: "Photo gallery", href: "/gallery" }, { label: "Science stories", href: "/stories" }, ...(sessionRole ? [{ label: "Portal workspace", href: sessionRole === "reviewer" ? "/admin/editorial" : sessionRole === "viewer" ? "/" : "/admin/content" }] : sessionRole === null ? [{ label: "Staff sign in", href: "/login" }] : [])].map((item) => <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className="rounded-lg px-3 py-3 text-sm text-slate-700 hover:bg-sky-50">{item.label}</Link>)}
           </div>
           <Link href="/explore" onClick={() => setMobileOpen(false)} className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#12679a] px-4 py-2.5 text-sm font-semibold text-white"><Search className="h-4 w-4" />Search research</Link>
         </nav>

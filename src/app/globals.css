@@ -78,26 +78,26 @@ html.high-contrast a {
 }
 
 .polar-card {
-  background-color: #0b1726;
-  border: 1px solid #18293d;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
   transition: all 0.2s ease-in-out;
 }
 
 .polar-card:hover {
-  border-color: #274567;
-  box-shadow: 0 4px 20px -4px rgba(6, 182, 212, 0.12);
+  border-color: #bfdbfe;
+  box-shadow: 0 4px 20px -4px rgba(18, 103, 154, 0.1);
 }
 
 .polar-input {
-  background-color: #08121f;
-  border: 1px solid #1c324a;
-  color: #f1f5f9;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #1e293b;
 }
 
 .polar-input:focus {
-  border-color: #38bdf8;
+  border-color: #0284c7;
   outline: none;
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.16);
 }
 
 /* Custom Scrollbars */

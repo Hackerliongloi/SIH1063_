@@ -74,6 +74,7 @@ class ExpeditionIn(BaseModel): name:str; year:int|None=None; region:str|None=Non
 class AssetIn(BaseModel): type:str; title:str; description:str=""; expedition_id:int|None=None; region:str|None=None; station:str|None=None; year:int|None=None; external_url:str|None=None; tags:list[str]=Field(default_factory=list); metadata:dict=Field(default_factory=dict)
 class DraftIn(BaseModel): kind:str; title:str; body_md:str=""; tone:str="general_public"; expedition_id:int|None=None; ai_assisted:bool=False
 class TransitionIn(BaseModel): action:str; comment:str=""; scheduled_at:str|None=None
+class EditorialCommentIn(BaseModel): comment:str=Field(min_length=1,max_length=5000)
 ASSET_TYPES={"report","dataset","publication","photo","video","activity"}; ROLES={"admin","editor","reviewer","viewer"}
 def serialize_asset(a): return {"id":a.id,"type":a.type,"title":a.title,"description":a.description,"expedition_id":a.expedition_id,"expedition":a.expedition.name if a.expedition else None,"region":a.region,"station":a.station,"year":a.year,"file_key":a.file_key,"thumb_key":a.thumb_key,"external_url":a.external_url,"status":a.status,"error":a.error,"version":a.version,"metadata":a.metadata_json,"created_at":a.created_at.isoformat() if a.created_at else None}
 def serialize_draft(d): return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at}
@@ -157,7 +158,14 @@ def add_asset(data:AssetIn,db:Session=Depends(get_db),u=Depends(require_roles("a
 def get_asset(aid:int,db:Session=Depends(get_db)):
     a=db.get(Asset,aid)
     if not a or a.status!="ready": raise HTTPException(404,"Asset not found")
-    db.add(ViewLog(asset_id=aid));db.commit();return serialize_asset(a)
+    chunks=db.scalars(select(Chunk).where(Chunk.asset_id==aid).order_by(Chunk.idx,Chunk.id)).all()
+    versions=db.scalars(select(AssetVersion).where(AssetVersion.asset_id==aid).order_by(AssetVersion.version.desc())).all()
+    expedition={"id":a.expedition.id,"name":a.expedition.name,"stations":a.expedition.stations or []} if a.expedition else None
+    version_rows=[{"version":row.version,"timestamp":row.created_at.isoformat() if row.created_at else None,"title":row.snapshot_json.get("title",a.title)} for row in versions]
+    if not version_rows:
+        version_rows=[{"version":a.version,"timestamp":a.updated_at.isoformat() if a.updated_at else None,"title":a.title}]
+    db.add(ViewLog(asset_id=aid));db.commit()
+    return {"asset":serialize_asset(a),"chunks":[{"id":chunk.id,"page":chunk.page,"text":chunk.text} for chunk in chunks],"versions":version_rows,"expedition":expedition}
 @app.patch("/api/assets/{aid}")
 def update_asset(aid:int,data:dict,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     a=db.get(Asset,aid)
@@ -173,7 +181,7 @@ def delete_asset(aid:int,db:Session=Depends(get_db),u=Depends(require_roles("adm
     if not a: raise HTTPException(404,"Asset not found")
     db.delete(a);db.commit()
 @app.post("/api/ingest/upload",status_code=202)
-async def upload(file:UploadFile=File(...),title:str=Form(...),type:str=Form("report"),description:str=Form(""),expedition_id:int|None=Form(None),station:str|None=Form(None),db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
+async def upload(file:UploadFile=File(...),title:str=Form(...),type:str=Form("report"),description:str=Form(""),expedition_id:int|None=Form(None),station:str|None=Form(None),region:str|None=Form(None),year:int|None=Form(None),db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     if type not in ASSET_TYPES: raise HTTPException(422,"Unsupported asset type")
     suffix=(file.filename or "").lower().rsplit(".",1)[-1] if "." in (file.filename or "") else ""
     allowed={"pdf","docx","csv","nc","nc4","jpg","jpeg","png","webp","tif","tiff","mp4","txt"}
@@ -183,7 +191,7 @@ async def upload(file:UploadFile=File(...),title:str=Form(...),type:str=Form("re
     signatures={"pdf":data.startswith(b"%PDF-"),"jpg":data.startswith(b"\xff\xd8\xff"),"jpeg":data.startswith(b"\xff\xd8\xff"),"png":data.startswith(b"\x89PNG\r\n\x1a\n"),"webp":data.startswith(b"RIFF") and data[8:12]==b"WEBP","mp4":len(data)>12 and data[4:8]==b"ftyp","nc":data.startswith((b"CDF\x01",b"CDF\x02",b"\x89HDF\r\n\x1a\n")),"nc4":data.startswith((b"CDF\x01",b"CDF\x02",b"\x89HDF\r\n\x1a\n")),"docx":data.startswith(b"PK\x03\x04"),"csv":True,"txt":True,"tif":data.startswith((b"II*\x00",b"MM\x00*")),"tiff":data.startswith((b"II*\x00",b"MM\x00*"))}
     if not signatures.get(suffix,False):raise HTTPException(415,"File content does not match its extension")
     key=store_file(data,suffix,file.content_type or "application/octet-stream")
-    a=Asset(type=type,title=title,description=description,expedition_id=expedition_id,station=station,file_key=key,status="processing",created_by=u.id,metadata_json={"filename":file.filename,"content_type":file.content_type,"size":len(data)})
+    a=Asset(type=type,title=title,description=description,expedition_id=expedition_id,station=station,region=region,year=year,file_key=key,status="processing",created_by=u.id,metadata_json={"filename":file.filename,"content_type":file.content_type,"size":len(data)})
     db.add(a);db.commit();db.refresh(a)
     queued=enqueue_ingestion(a.id,key,suffix)
     if not queued:
@@ -268,6 +276,14 @@ def draft_detail(did:int,db:Session=Depends(get_db),u=Depends(require_roles("adm
     d=db.get(Draft,did)
     if not d:raise HTTPException(404,"Draft not found")
     return {**serialize_draft(d),"citations":[{"claim_text":c.claim_text,"chunk_id":c.chunk_id,"asset_id":c.asset_id,"span_text":c.span_text,"supported":c.supported} for c in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==did))],"comments":[{"author_id":c.author_id,"body":c.body,"action":c.action,"created_at":c.created_at} for c in db.scalars(select(DraftComment).where(DraftComment.draft_id==did))]}
+@app.post("/api/editorial/drafts/{did}/comments",status_code=201)
+def add_draft_comment(did:int,data:EditorialCommentIn,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):
+    d=db.get(Draft,did)
+    if not d:raise HTTPException(404,"Draft not found")
+    comment=DraftComment(draft_id=did,author_id=u.id,body=data.comment.strip(),action="comment")
+    if not comment.body:raise HTTPException(422,"Comment cannot be empty")
+    db.add(comment);db.commit();db.refresh(comment)
+    return {"id":comment.id,"body":comment.body,"action":comment.action,"created_at":comment.created_at,"author_id":u.id}
 @app.post("/api/editorial/drafts/{did}/transition")
 def transition(did:int,data:TransitionIn,db:Session=Depends(get_db),u=Depends(current_user)):
     d=db.get(Draft,did)

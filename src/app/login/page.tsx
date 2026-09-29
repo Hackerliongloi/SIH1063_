@@ -25,8 +25,13 @@ export default function LoginPage() {
       if (!response.ok) throw new Error(result.detail || "Sign in failed. Check your email and password.");
       const role = result.user?.role;
       if (!["admin", "editor", "reviewer", "viewer"].includes(role)) throw new Error("This account does not have an assigned portal role.");
+      window.dispatchEvent(new Event("polar-auth-changed"));
       const next = new URLSearchParams(window.location.search).get("next");
-      router.replace(next?.startsWith("/admin") ? next : role === "viewer" ? "/" : "/admin/content");
+      const roleCanOpenNext = role === "admin"
+        || (role === "editor" && ["/admin/content", "/admin/editorial", "/admin/generate"].some((path) => next?.startsWith(path)))
+        || (role === "reviewer" && next?.startsWith("/admin/editorial"));
+      const safeNext = next?.startsWith("/admin") && roleCanOpenNext;
+      router.replace(safeNext ? next! : role === "reviewer" ? "/admin/editorial" : role === "viewer" ? "/" : "/admin/content");
       router.refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to sign in. Please try again.");
