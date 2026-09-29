@@ -5,26 +5,39 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
-  BookOpen,
   ShieldCheck,
   ExternalLink,
-  Calendar,
-  User,
-  Share2,
   X,
-  FileText,
   Sparkles,
 } from "lucide-react";
 import { api } from "@/lib/api";
+
+type StoryCitation = {
+  id: number;
+  chunk_id?: number | string | null;
+  supported?: boolean;
+  claim_text?: string | null;
+  asset_title?: string | null;
+  span_text?: string | null;
+  asset_id?: number | null;
+};
+
+type StoryRecord = {
+  title: string;
+  created_by?: number | string | null;
+  expedition_name?: string | null;
+  body_md?: string | null;
+  citations?: StoryCitation[];
+};
 
 export default function StoryDetailPage() {
   const params = useParams();
   const router = useRouter();
   const storyId = params?.id as string;
 
-  const [story, setStory] = useState<any | null>(null);
+  const [story, setStory] = useState<StoryRecord | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedCitation, setSelectedCitation] = useState<any | null>(null);
+  const [selectedCitation, setSelectedCitation] = useState<StoryCitation | null>(null);
 
   useEffect(() => {
     async function loadStory() {
@@ -143,24 +156,23 @@ export default function StoryDetailPage() {
             </h3>
 
             <div className="space-y-3">
-              {story.citations.map((cit: any, idx: number) => (
+              {story.citations.map((cit, idx) => (
                 <div
                   key={cit.id}
-                  onClick={() => setSelectedCitation(cit)}
-                  className="cursor-pointer bg-[#08121f] hover:bg-[#0c1b2c] border border-[#18293d] hover:border-emerald-500/50 rounded-xl p-4 transition-all text-xs space-y-2 group"
+                  className="bg-[#08121f] border border-[#18293d] rounded-xl p-4 text-xs space-y-2"
                 >
                   <div className="flex items-center justify-between font-mono">
                     <span className="text-emerald-400 font-bold flex items-center gap-1.5">
                       Citation [{cit.chunk_id || `C${idx+1}`}]
                       {cit.supported && (
                         <span className="text-[10px] bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-800">
-                          Supported ✓
+                          Supported
                         </span>
                       )}
                     </span>
-                    <span className="text-sky-400 text-[11px] group-hover:underline flex items-center gap-1">
-                      Inspect Span <ExternalLink className="w-3 h-3" />
-                    </span>
+                    <button type="button" onClick={() => setSelectedCitation(cit)} className="inline-flex min-h-9 items-center gap-1 rounded px-2 text-[11px] font-semibold text-sky-300 hover:bg-sky-950/50 hover:text-white" aria-label={`Inspect citation ${cit.chunk_id || idx + 1}`}>
+                      Inspect span <ExternalLink className="w-3 h-3" />
+                    </button>
                   </div>
 
                   <p className="text-slate-300">
@@ -213,7 +225,7 @@ export default function StoryDetailPage() {
               </div>
 
               <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-lg text-emerald-300 font-mono text-[11px]">
-                ✓ Validated against official technical report text with fuzzy threshold &gt; 0.90. No hallucinations detected.
+              Citation span validated against the linked source text.
               </div>
             </div>
 

@@ -26,6 +26,16 @@
     outline: 3px solid #e79a24;
     outline-offset: 2px;
   }
+
+  ::selection {
+    background: #075985;
+    color: #ffffff;
+  }
+
+  ::-moz-selection {
+    background: #075985;
+    color: #ffffff;
+  }
 }
 
 .skip-link {
@@ -43,7 +53,20 @@
 
 .skip-link:focus { top: 1rem; }
 
-html.high-contrast { filter: contrast(1.35); }
+html.high-contrast :focus-visible {
+  outline: 4px solid #facc15 !important;
+  outline-offset: 3px;
+}
+
+html.high-contrast a {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+@media (forced-colors: active) {
+  * { forced-color-adjust: auto; }
+}
 
 /* Polar Scientific Utilities */
 .ice-gradient-bg {
@@ -84,14 +107,15 @@ html.high-contrast { filter: contrast(1.35); }
 }
 
 ::-webkit-scrollbar-track {
-  background: #060d17;
+  background: #e8eef3;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #18293d;
-  border-radius: 3px;
+  background: #94a3b8;
+  border: 2px solid #e8eef3;
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #274567;
+  background: #64748b;
 }
