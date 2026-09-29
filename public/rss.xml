@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>NCPOR News &amp; Research Updates</title>
+    <link>https://ncpor.res.in/</link>
+    <description>News, science and expedition updates from the National Centre for Polar and Ocean Research.</description>
+    <language>en-in</language>
+    <item>
+      <title>NCPOR Volunteers united for Cleaner Shores: Swachh Sagar, Surakshit Sagar 5.0</title>
+      <link>https://ncpor.res.in/</link>
+      <description>Institutional outreach and public participation for cleaner shores and ocean stewardship.</description>
+    </item>
+    <item>
+      <title>AFops 2026 Opens in Kochi</title>
+      <link>https://ncpor.res.in/</link>
+      <description>An update from the Antarctic expedition operations community.</description>
+    </item>
+    <item>
+      <title>Unravelling Glacier–Lake Dynamics in the Himalaya</title>
+      <link>https://ncpor.res.in/</link>
+      <description>Research update on glacier and lake processes in the Himalayan region.</description>
+    </item>
+  </channel>
+</rss>
