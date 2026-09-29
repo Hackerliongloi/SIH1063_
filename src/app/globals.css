@@ -1,26 +1,71 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg-polar: #060d17;
+    --card-polar: #0b1726;
+    --border-polar: #18293d;
+    --accent-ice: #38bdf8;
+    --accent-teal: #14b8a6;
+    --accent-navy: #0f2744;
+  }
+
+  body {
+    background-color: #060d17;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Polar Scientific Utilities */
+.ice-gradient-bg {
+  background: radial-gradient(circle at 50% 0%, #0d233a 0%, #060d17 65%);
+}
+
+.aurora-subtle-glow {
+  background: radial-gradient(ellipse at 80% 20%, rgba(20, 184, 166, 0.08) 0%, transparent 60%);
+}
+
+.polar-card {
+  background-color: #0b1726;
+  border: 1px solid #18293d;
+  transition: all 0.2s ease-in-out;
+}
+
+.polar-card:hover {
+  border-color: #274567;
+  box-shadow: 0 4px 20px -4px rgba(6, 182, 212, 0.12);
+}
+
+.polar-input {
+  background-color: #08121f;
+  border: 1px solid #1c324a;
+  color: #f1f5f9;
+}
+
+.polar-input:focus {
+  border-color: #38bdf8;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #060d17;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #18293d;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #274567;
 }
