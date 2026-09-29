@@ -1,4 +1,4 @@
-import logging, uuid
+import logging, re, uuid
 from datetime import date, datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request
@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, or_, type_coerce
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field, field_validator
 from .core.config import settings
 from .core.db import Base, engine, get_db, SessionLocal
 from .core.security import hash_password, verify_password, token_for, current_user, require_roles
@@ -41,8 +41,35 @@ async def request_context(request: Request, call_next):
     response.headers["X-Content-Type-Options"]="nosniff"
     return response
 
-class Login(BaseModel): email: EmailStr; password: str
-class UserIn(BaseModel): email: EmailStr; password: str=Field(min_length=12); role: str="viewer"
+def normalize_portal_email(value: str) -> str:
+    email = value.strip().lower()
+    local, separator, domain = email.rpartition("@")
+    label_pattern = r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
+    if (not separator or not local or len(email) > 320 or len(local) > 64
+            or not re.fullmatch(r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+", local)
+            or ".." in local or not all(re.fullmatch(label_pattern, label) for label in domain.split("."))
+            or len(domain.split(".")) < 2):
+        raise ValueError("Enter a valid email address")
+    return email
+
+class Login(BaseModel):
+    email: str
+    password: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return normalize_portal_email(value)
+
+class UserIn(BaseModel):
+    email: str
+    password: str=Field(min_length=12)
+    role: str="viewer"
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return normalize_portal_email(value)
 class ExpeditionIn(BaseModel): name:str; year:int|None=None; region:str|None=None; start_date:date|None=None; end_date:date|None=None; stations:list[str]=Field(default_factory=list); description:str=""
 class AssetIn(BaseModel): type:str; title:str; description:str=""; expedition_id:int|None=None; region:str|None=None; station:str|None=None; year:int|None=None; external_url:str|None=None; tags:list[str]=Field(default_factory=list); metadata:dict=Field(default_factory=dict)
 class DraftIn(BaseModel): kind:str; title:str; body_md:str=""; tone:str="general_public"; expedition_id:int|None=None; ai_assisted:bool=False

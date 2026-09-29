@@ -73,6 +73,7 @@ export default function Navbar() {
 
         <div className="hidden items-center gap-3 lg:flex">
           <Link href="/news" className="text-sm font-medium text-slate-600 hover:text-[#12679a]">News & Updates</Link>
+          <Link href="/login" className="text-sm font-medium text-slate-600 hover:text-[#12679a]">Staff sign in</Link>
           <Link href="/explore" className="inline-flex items-center gap-2 rounded-md bg-[#12679a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0d527d]">
             <Search className="h-4 w-4" /> Search research
           </Link>
@@ -87,6 +88,7 @@ export default function Navbar() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center">
             <Link href="/" className={`px-3 py-3 text-sm font-semibold ${pathname === "/" ? "text-[#12679a]" : "text-slate-700 hover:text-[#12679a]"}`}>Home</Link>
+            <Link href="/discover" className={`px-3 py-3 text-sm font-semibold ${isActive("/discover") ? "text-[#12679a]" : "text-slate-700 hover:text-[#12679a]"}`}>Posts &amp; Reels</Link>
             {navigationGroups.map((group) => (
               <button key={group.label} type="button" onMouseEnter={() => setOpenGroup(group.label)} onFocus={() => setOpenGroup(group.label)} onClick={() => setOpenGroup(openGroup === group.label ? null : group.label)} aria-expanded={openGroup === group.label} className={`inline-flex items-center gap-1 px-3 py-3 text-sm font-semibold ${openGroup === group.label ? "text-[#12679a]" : "text-slate-700 hover:text-[#12679a]"}`}>
                 {group.label}<ChevronDown className="h-3.5 w-3.5" />
@@ -131,7 +133,7 @@ export default function Navbar() {
             </section>
           ))}
           <div className="grid grid-cols-2 gap-1 border-t border-slate-100 pt-2">
-            {[{ label: "Tenders", href: "/tenders" }, { label: "Careers", href: "/careers" }, { label: "News", href: "/news" }, { label: "Photo gallery", href: "/gallery" }, { label: "Stories", href: "/stories" }, ...adminLinks].map((item) => <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className="rounded px-3 py-3 text-sm text-slate-700 hover:bg-sky-50">{item.label}</Link>)}
+            {[{ label: "Posts & Reels", href: "/discover" }, { label: "Tenders", href: "/tenders" }, { label: "Careers", href: "/careers" }, { label: "News", href: "/news" }, { label: "Photo gallery", href: "/gallery" }, { label: "Stories", href: "/stories" }, { label: "Staff sign in", href: "/login" }, ...adminLinks].map((item) => <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className="rounded px-3 py-3 text-sm text-slate-700 hover:bg-sky-50">{item.label}</Link>)}
           </div>
         </nav>
       )}

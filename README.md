@@ -16,7 +16,7 @@ A FastAPI modular monolith for the Polar science archive, editorial workflow, an
 1. Copy `.env.example` to `.env` and replace `SECRET_KEY`, `ADMIN_PASSWORD`, `POSTGRES_PASSWORD`, and storage credentials before exposing this beyond localhost.
 2. Start the stack: `docker compose -f infra/docker-compose.yml up --build`.
 3. Open the site at `http://localhost:3000`, API docs at `http://localhost:8000/docs`, and the RustFS console at `http://localhost:9001`.
-4. First admin login uses the configured `ADMIN_EMAIL` and `ADMIN_PASSWORD` (defaults are for local development only).
+4. Open `http://localhost:3000/login` to sign in. The first administrator uses the configured `ADMIN_EMAIL` and `ADMIN_PASSWORD` (defaults are for local development only). The web app stores backend tokens in secure, HttpOnly cookies and forwards them through its same-origin API proxy. Public browsing does not require an account; user accounts are created by an administrator through the protected `/api/users` endpoint.
 
 ### Seed NCPOR-linked demo content
 
