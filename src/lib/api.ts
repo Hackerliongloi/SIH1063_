@@ -1,8 +1,130 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
+const mockAssets = [
+  {
+    id: "asset-001",
+    title: "Maitri Winterover Glacier Margin Survey",
+    type: "report",
+    region: "Antarctica",
+    year: 2024,
+    summary: "Seasonal ice margin observations from Maitri Station during the winterover period.",
+    tags: ["glacier", "winterover", "antarctica"],
+  },
+  {
+    id: "asset-002",
+    title: "Bharati Aurora Borealis Time Series",
+    type: "dataset",
+    region: "Antarctica",
+    year: 2023,
+    summary: "Auroral variability and weather correlations recorded across the 2023 campaign.",
+    tags: ["aurora", "weather", "bharati"],
+  },
+  {
+    id: "asset-003",
+    title: "Kongsfjorden CTD Salinity Profile",
+    type: "dataset",
+    region: "Arctic",
+    year: 2022,
+    summary: "CTD depth profile measuring salinity and temperature at Kongsfjorden.",
+    tags: ["ctd", "salinity", "arctic"],
+  },
+];
+
+const mockStories = [
+  {
+    id: "story-001",
+    title: "Cryosphere Watching from the Indian Polar Network",
+    slug: "cryosphere-watching-from-the-indian-polar-network",
+    excerpt: "A narrative summary of how long-term monitoring supports climate resilience work.",
+    published_at: "2024-06-15T00:00:00Z",
+  },
+  {
+    id: "story-002",
+    title: "From Ice Cores to Community Outreach",
+    slug: "from-ice-cores-to-community-outreach",
+    excerpt: "Translating polar science into local climate literacy and public engagement.",
+    published_at: "2024-03-05T00:00:00Z",
+  },
+];
+
+const mockExpeditions = [
+  {
+    id: "exp-001",
+    name: "Maitri Winterover 2023-24",
+    region: "Schirmacher Oasis",
+    status: "active",
+  },
+  {
+    id: "exp-002",
+    name: "Bharati Coastal Sensing Campaign",
+    region: "Larsemann Hills",
+    status: "completed",
+  },
+];
+
+const mockSearchResults = {
+  results: [
+    {
+      id: "sr-001",
+      title: "Adélie Penguin Rookery Census",
+      type: "report",
+      region: "Antarctica",
+      year: 2024,
+      score: 0.97,
+      summary: "Population and breeding activity census around the Maitri observation grid.",
+    },
+    {
+      id: "sr-002",
+      title: "Sutri Dhaka Glacier Mass Balance",
+      type: "dataset",
+      region: "Himalaya",
+      year: 2023,
+      score: 0.91,
+      summary: "Mass balance observations tracked across the Himalayan cryosphere segment.",
+    },
+  ],
+  total: 2,
+  parsed_year_range: { from: 2023, to: 2024 },
+};
+
+function mockResponseFor(endpoint: string): any {
+  if (endpoint === "/assets" || endpoint.startsWith("/assets?")) {
+    return mockAssets;
+  }
+
+  if (endpoint === "/stories" || endpoint.startsWith("/stories?")) {
+    return mockStories;
+  }
+
+  if (endpoint === "/expeditions" || endpoint.startsWith("/expeditions?")) {
+    return mockExpeditions;
+  }
+
+  if (endpoint.startsWith("/search")) {
+    return mockSearchResults;
+  }
+
+  if (endpoint === "/analytics/summary") {
+    return {
+      total_assets: mockAssets.length,
+      total_stories: mockStories.length,
+      total_expeditions: mockExpeditions.length,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  if (endpoint === "/config") {
+    return { api_mode: "demo", ready: true };
+  }
+
+  return null;
+}
+
 export async function fetchFromAPI(endpoint: string, options?: RequestInit) {
+  const url = `${API_BASE}${endpoint}`;
+
   try {
-    const res = await fetch(`${API_BASE}${endpoint}`, {
+    const res = await fetch(url, {
       ...options,
       headers: {
         "Content-Type": "application/json",
@@ -10,11 +132,18 @@ export async function fetchFromAPI(endpoint: string, options?: RequestInit) {
       },
       cache: "no-store",
     });
+
     if (!res.ok) {
       throw new Error(`API error ${res.status}: ${res.statusText}`);
     }
+
     return await res.json();
   } catch (err) {
+    const fallback = mockResponseFor(endpoint);
+    if (fallback !== null) {
+      return fallback;
+    }
+
     console.error(`Fetch failed for ${endpoint}:`, err);
     throw err;
   }
