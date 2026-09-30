@@ -2,8 +2,10 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Sparkles,
+  Clapperboard,
   FileText,
   CheckCircle2,
   AlertTriangle,
@@ -164,6 +166,7 @@ function GenerateStudioContent() {
                   { id: "twitter", label: "Twitter Thread", icon: TwitterIcon },
                   { id: "instagram", label: "Instagram Post", icon: InstagramIcon },
                   { id: "facebook", label: "Facebook Update", icon: FacebookIcon },
+                  { id: "reel", label: "Reel Script", icon: Clapperboard },
                 ].map((fmt) => {
                   const Icon = fmt.icon;
                   const active = selectedFormats.includes(fmt.id);
@@ -325,13 +328,19 @@ function GenerateStudioContent() {
                   ))}
                 </div>
 
-                <button
-                  onClick={() => sendToEditorial(String(activeDraft.id))}
-                  className="px-3.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium flex items-center gap-1.5 shadow-sm"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  Submit to Review Desk
-                </button>
+                {activeDraft.kind === "reel" ? (
+                  <Link href="/admin/reels" className="px-3.5 py-1.5 rounded-lg bg-[#12679a] hover:bg-[#0d527d] text-white text-xs font-medium flex items-center gap-1.5 shadow-sm">
+                    <Clapperboard className="w-3.5 h-3.5" />Attach video & manage reel
+                  </Link>
+                ) : (
+                  <button
+                    onClick={() => sendToEditorial(String(activeDraft.id))}
+                    className="px-3.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    Submit to Review Desk
+                  </button>
+                )}
               </div>
 
               {/* Active Draft Details */}

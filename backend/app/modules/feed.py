@@ -73,7 +73,8 @@ def item_json(x):
     if not media and serialized_asset and serialized_asset["type"] in {"photo","video"}:media=[{**serialized_asset,"type":"video" if serialized_asset["type"]=="video" else "image","alt_text":""}]
     sources=[{"asset_id":c.asset_id,"chunk_id":c.chunk_id,"label":c.label or (c.asset.title if c.asset else ""),"source_url":c.source_url or (c.asset.external_url if c.asset else None),"claim_text":c.claim_text,"span_text":c.span_text,"supported":c.supported} for c in x.sources]
     video_media=next((entry.asset for entry in x.media if entry.kind=="video" and entry.asset),None)
-    video_url=x.mp4_key or (asset.external_url if asset and asset.type=="video" else video_media.external_url if video_media else None)
+    video_asset=video_media or (asset if asset and asset.type=="video" else None)
+    video_url=(f"/api/assets/{video_asset.id}/media" if video_asset and video_asset.file_key else video_asset.external_url if video_asset else None)
     return {"id":x.id,"kind":x.kind,"caption":x.caption,"title":x.title,"description":x.description,"region":x.region,"station":x.station,"event_at":x.event_at,"hashtags":x.hashtags,"expedition_id":x.expedition_id,"primary_asset_id":x.primary_asset_id,"primary_asset":serialized_asset,"media":media,"sources":sources,"poster_key":x.poster_key,"hls_key":x.hls_key,"mp4_key":x.mp4_key,"video_url":video_url,"duration_s":x.duration_s,"aspect":x.aspect,"status":x.status,"scheduled_at":x.scheduled_at,"approved_at":x.approved_at,"published_at":x.published_at,"updated_at":x.updated_at,"rank_score":x.rank_score,"like_count":x.like_count,"view_count":x.view_count,"share_count":x.share_count,"ai_assisted":x.ai_assisted,"source":x.source}
 
 def citation_row(data:CitationIn, story_id:int|None=None, slide_id:int|None=None, item_id:int|None=None, db:Session|None=None):
@@ -225,6 +226,13 @@ def reels(cursor:str|None=None,limit:int=20,db:Session=Depends(get_db)):
     rows=db.scalars(q.order_by(FeedItem.published_at.desc()).limit(min(max(limit,1),50)+1)).all();more=len(rows)>min(max(limit,1),50);rows=rows[:min(max(limit,1),50)]
     return {"items":[item_json(x) for x in rows],"next_cursor":rows[-1].published_at.isoformat() if more and rows else None}
 
+@router.get("/feed/manage")
+def manage_feed_items(kind:str|None=None,status:str|None=None,limit:int=100,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):
+    q=select(FeedItem)
+    if kind:q=q.where(FeedItem.kind==kind)
+    if status:q=q.where(FeedItem.status==status)
+    return [item_json(item) for item in db.scalars(q.order_by(FeedItem.created_at.desc()).limit(min(max(limit,1),200))).all()]
+
 @router.get("/discovery/search")
 def discovery_search(q:str="",content_type:str|None=None,region:str|None=None,expedition_id:int|None=None,year_from:int|None=None,year_to:int|None=None,station:str|None=None,theme:str|None=None,page:int=1,page_size:int=20,db:Session=Depends(get_db)):
     allowed={"report","dataset","publication","photo","video","activity","post","carousel","reel","story","article"}
@@ -339,7 +347,11 @@ def create_item(data:FeedIn,db:Session=Depends(get_db),u=Depends(require_roles("
     if data.primary_asset_id:
         asset=db.get(Asset,data.primary_asset_id)
         if not asset or asset.status!="ready":raise HTTPException(422,"Primary asset is unavailable")
-    x=FeedItem(**data.model_dump(),status="draft",created_by=u.id);db.add(x);db.commit();db.refresh(x);return item_json(x)
+    x=FeedItem(**data.model_dump(),status="draft",created_by=u.id)
+    if data.primary_asset_id:
+        asset=db.get(Asset,data.primary_asset_id)
+        if asset and asset.type=="video":x.mp4_key=asset.file_key
+    db.add(x);db.commit();db.refresh(x);return item_json(x)
 
 @router.put("/feed/items/{item_id}/media")
 def replace_item_media(item_id:int,items:list[MediaIn],db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
@@ -396,6 +408,15 @@ def feed_transition(item_id:int,data:dict,db:Session=Depends(get_db),u=Depends(c
     if x.status=="published":x.published_at=now()
     if action=="unpublish":x.published_at=None;x.scheduled_at=None
     x.updated_at=now()
+    if x.origin_draft_id:
+        draft=db.get(Draft,x.origin_draft_id)
+        if draft and draft.kind=="reel":
+            draft_states={"submit":"in_review","approve":"approved","request_changes":"changes_requested","reject":"rejected","schedule":"scheduled","publish":"published","unpublish":"approved","archive":"archived"}
+            draft.status=draft_states[action];draft.updated_at=now()
+            if action in {"approve","request_changes","reject"}:draft.reviewer_id=u.id
+            if action=="approve":draft.approved_at=now()
+            if action=="publish":draft.published_at=now()
+            if action=="unpublish":draft.published_at=None;draft.scheduled_at=None
     db.commit();return item_json(x)
 @router.get("/feed/autogen/rules")
 def rules(db:Session=Depends(get_db),u=Depends(require_roles("admin"))):return [{"id":x.id,"name":x.name,"trigger":x.trigger,"template":x.template,"enabled":x.enabled,"auto_publish":x.auto_publish,"max_per_day":x.max_per_day} for x in db.scalars(select(AutogenRule))]

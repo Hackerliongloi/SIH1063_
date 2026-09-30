@@ -3,7 +3,7 @@ from datetime import date, datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, or_, type_coerce
 from pydantic import BaseModel, Field, field_validator
@@ -11,7 +11,7 @@ from .core.config import settings
 from .core.db import Base, engine, get_db, SessionLocal
 from .core.security import hash_password, verify_password, token_for, current_user, require_roles
 from .models import *
-from .services import store_file, enqueue_ingestion, extract_text
+from .services import store_file, enqueue_ingestion, extract_text, file_size, stream_file
 from .embeddings import embed, cosine
 from .providers import generate_locally, generate_openrouter
 from pgvector.sqlalchemy import Vector
@@ -166,6 +166,36 @@ def get_asset(aid:int,db:Session=Depends(get_db)):
         version_rows=[{"version":a.version,"timestamp":a.updated_at.isoformat() if a.updated_at else None,"title":a.title}]
     db.add(ViewLog(asset_id=aid));db.commit()
     return {"asset":serialize_asset(a),"chunks":[{"id":chunk.id,"page":chunk.page,"text":chunk.text} for chunk in chunks],"versions":version_rows,"expedition":expedition}
+
+@app.get("/api/assets/{aid}/media")
+def stream_asset_media(aid:int,request:Request,db:Session=Depends(get_db)):
+    asset=db.get(Asset,aid)
+    if not asset or asset.status!="ready" or asset.type!="video" or not asset.file_key:
+        raise HTTPException(404,"Video media not found")
+    try:total=file_size(asset.file_key)
+    except Exception:raise HTTPException(404,"Video media is unavailable")
+    if total<=0:raise HTTPException(404,"Video media is empty")
+    start,end=0,total-1;status=200
+    requested=request.headers.get("range")
+    if requested:
+        match=re.fullmatch(r"bytes=(\d*)-(\d*)",requested.strip())
+        if not match or (not match.group(1) and not match.group(2)):
+            raise HTTPException(416,"Invalid byte range",headers={"Content-Range":f"bytes */{total}"})
+        if match.group(1):
+            start=int(match.group(1));end=int(match.group(2)) if match.group(2) else total-1
+        else:
+            length=int(match.group(2));start=max(total-length,0)
+        if start>=total or end<start:
+            raise HTTPException(416,"Requested byte range is not satisfiable",headers={"Content-Range":f"bytes */{total}"})
+        end=min(end,total-1);status=206
+    headers={"Accept-Ranges":"bytes","Content-Length":str(end-start+1),"Cache-Control":"public, max-age=3600"}
+    if status==206:headers["Content-Range"]=f"bytes {start}-{end}/{total}"
+    content_type=(asset.metadata_json or {}).get("content_type") or "video/mp4"
+    if not content_type.startswith("video/"):content_type="video/mp4"
+    try:body=stream_file(asset.file_key,start,end)
+    except Exception:raise HTTPException(404,"Video media is unavailable")
+    return StreamingResponse(body,status_code=status,media_type=content_type,headers=headers)
+
 @app.patch("/api/assets/{aid}")
 def update_asset(aid:int,data:dict,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     a=db.get(Asset,aid)
@@ -305,6 +335,16 @@ def transition(did:int,data:TransitionIn,db:Session=Depends(get_db),u=Depends(cu
     if data.action=="approve":d.approved_at=now()
     if data.action=="unpublish":d.published_at=None;d.scheduled_at=None
     d.updated_at=now()
+    linked_states={"submit":"in_review","approve":"approved","request_changes":"changes_requested","reject":"rejected","schedule":"scheduled","publish":"published","unschedule":"approved","unpublish":"approved","archive":"archived"}
+    if d.kind=="reel":
+        from .modules.feed import FeedItem
+        linked_item=db.scalar(select(FeedItem).where(FeedItem.origin_draft_id==did))
+        if linked_item and linked_item.status in {"draft","changes_requested","in_review","approved","scheduled","published"}:
+            linked_item.status=linked_states[data.action];linked_item.updated_at=now()
+            if data.action in {"approve","request_changes","reject"}:linked_item.reviewer_id=u.id
+            if data.action=="approve":linked_item.approved_at=now()
+            if data.action in {"publish","schedule"}:linked_item.published_at=now() if data.action=="publish" else None
+            if data.action in {"unpublish","unschedule"}:linked_item.published_at=None;linked_item.scheduled_at=None
     db.add(DraftComment(draft_id=did,author_id=u.id,body=data.comment,action=data.action));db.commit();db.refresh(d);return serialize_draft(d)
 @app.get("/api/editorial/calendar")
 def calendar(month:str|None=None,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):return [serialize_draft(d) for d in db.scalars(select(Draft).where(Draft.scheduled_at.is_not(None)).order_by(Draft.scheduled_at))]
@@ -380,7 +420,7 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
                 else:
                     first_asset=db.get(Asset,selected_citations[0]["asset_id"]) if selected_citations else None
                     media_asset=first_asset if first_asset and first_asset.type in {"photo","video"} else None
-                    item=FeedItem(kind=kind,caption=body,title=title,description="AI-assisted source-grounded draft; review before publication.",expedition_id=payload.get("expedition_id"),region=first_asset.region if first_asset else None,station=first_asset.station if first_asset else None,primary_asset_id=media_asset.id if media_asset else None,source="auto",status="draft",ai_assisted=True,created_by=u.id)
+                    item=FeedItem(kind=kind,caption=body,title=title,description="AI-assisted source-grounded draft; review before publication.",expedition_id=expedition_id,region=first_asset.region if first_asset else None,station=first_asset.station if first_asset else None,primary_asset_id=media_asset.id if media_asset else None,source="auto",origin_draft_id=d.id,status="draft",ai_assisted=True,created_by=u.id)
                     db.add(item);db.flush()
                     for source in selected_citations:
                         db.add(FeedCitation(item_id=item.id,asset_id=source["asset_id"],chunk_id=source["chunk_id"],claim_text=source.get("claim_text",source.get("text","")[:350]),span_text=source.get("span_text",source.get("text","")),label=source.get("asset_title", ""),supported=True))

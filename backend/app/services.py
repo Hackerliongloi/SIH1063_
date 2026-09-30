@@ -23,6 +23,33 @@ def read_file(key:str)->bytes:
     client=boto3.client("s3",endpoint_url=settings.storage_endpoint,aws_access_key_id=settings.storage_access_key,aws_secret_access_key=settings.storage_secret_key,region_name=settings.storage_region)
     return client.get_object(Bucket=settings.storage_bucket,Key=key)["Body"].read()
 
+def file_size(key:str)->int:
+    if key.startswith("local:"):
+        return (Path(os.getenv("LOCAL_MEDIA_DIR","./media"))/key.removeprefix("local:")).stat().st_size
+    import boto3
+    client=boto3.client("s3",endpoint_url=settings.storage_endpoint,aws_access_key_id=settings.storage_access_key,aws_secret_access_key=settings.storage_secret_key,region_name=settings.storage_region)
+    return int(client.head_object(Bucket=settings.storage_bucket,Key=key)["ContentLength"])
+
+def stream_file(key:str,start:int,end:int):
+    """Yield a bounded byte range without buffering an entire video in memory."""
+    if key.startswith("local:"):
+        path=Path(os.getenv("LOCAL_MEDIA_DIR","./media"))/key.removeprefix("local:")
+        def local_chunks():
+            with path.open("rb") as source:
+                source.seek(start);remaining=end-start+1
+                while remaining>0:
+                    chunk=source.read(min(1024*1024,remaining))
+                    if not chunk:break
+                    remaining-=len(chunk);yield chunk
+        return local_chunks()
+    import boto3
+    client=boto3.client("s3",endpoint_url=settings.storage_endpoint,aws_access_key_id=settings.storage_access_key,aws_secret_access_key=settings.storage_secret_key,region_name=settings.storage_region)
+    body=client.get_object(Bucket=settings.storage_bucket,Key=key,Range=f"bytes={start}-{end}")["Body"]
+    def s3_chunks():
+        try:yield from body.iter_chunks(chunk_size=1024*1024)
+        finally:body.close()
+    return s3_chunks()
+
 def extract_text(data:bytes,suffix:str)->str:
     if suffix=="txt":return data.decode("utf-8",errors="replace")
     if suffix=="csv":return data.decode("utf-8",errors="replace")[:5_000_000]
