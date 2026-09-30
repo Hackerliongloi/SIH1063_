@@ -1,18 +1,19 @@
-import logging, uuid
+import logging, re, uuid
+from datetime import date, datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, or_, type_coerce
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field, field_validator
 from .core.config import settings
 from .core.db import Base, engine, get_db, SessionLocal
 from .core.security import hash_password, verify_password, token_for, current_user, require_roles
 from .models import *
 from .services import store_file, enqueue_ingestion, extract_text
 from .embeddings import embed, cosine
-from .providers import generate_locally
+from .providers import generate_locally, generate_openrouter
 from pgvector.sqlalchemy import Vector
 from .core.rate_limit import enforce_rate_limit
 
@@ -40,15 +41,49 @@ async def request_context(request: Request, call_next):
     response.headers["X-Content-Type-Options"]="nosniff"
     return response
 
-class Login(BaseModel): email: EmailStr; password: str
-class UserIn(BaseModel): email: EmailStr; password: str=Field(min_length=12); role: str="viewer"
-class ExpeditionIn(BaseModel): name:str; year:int|None=None; region:str|None=None; stations:list[str]=[]; description:str=""
-class AssetIn(BaseModel): type:str; title:str; description:str=""; expedition_id:int|None=None; region:str|None=None; year:int|None=None; external_url:str|None=None; tags:list[str]=[]; metadata:dict={}
-class DraftIn(BaseModel): kind:str; title:str; body_md:str=""; tone:str="general_public"; expedition_id:int|None=None
+def normalize_portal_email(value: str) -> str:
+    email = value.strip().lower()
+    local, separator, domain = email.rpartition("@")
+    label_pattern = r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
+    if (not separator or not local or len(email) > 320 or len(local) > 64
+            or not re.fullmatch(r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+", local)
+            or ".." in local or not all(re.fullmatch(label_pattern, label) for label in domain.split("."))
+            or len(domain.split(".")) < 2):
+        raise ValueError("Enter a valid email address")
+    return email
+
+class Login(BaseModel):
+    email: str
+    password: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return normalize_portal_email(value)
+
+class UserIn(BaseModel):
+    email: str
+    password: str=Field(min_length=12)
+    role: str="viewer"
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return normalize_portal_email(value)
+class ExpeditionIn(BaseModel): name:str; year:int|None=None; region:str|None=None; start_date:date|None=None; end_date:date|None=None; stations:list[str]=Field(default_factory=list); description:str=""
+class AssetIn(BaseModel): type:str; title:str; description:str=""; expedition_id:int|None=None; region:str|None=None; station:str|None=None; year:int|None=None; external_url:str|None=None; tags:list[str]=Field(default_factory=list); metadata:dict=Field(default_factory=dict)
+class DraftIn(BaseModel): kind:str; title:str; body_md:str=""; tone:str="general_public"; expedition_id:int|None=None; ai_assisted:bool=False
 class TransitionIn(BaseModel): action:str; comment:str=""; scheduled_at:str|None=None
+class EditorialCommentIn(BaseModel): comment:str=Field(min_length=1,max_length=5000)
 ASSET_TYPES={"report","dataset","publication","photo","video","activity"}; ROLES={"admin","editor","reviewer","viewer"}
-def serialize_asset(a): return {"id":a.id,"type":a.type,"title":a.title,"description":a.description,"expedition_id":a.expedition_id,"expedition":a.expedition.name if a.expedition else None,"region":a.region,"year":a.year,"file_key":a.file_key,"thumb_key":a.thumb_key,"external_url":a.external_url,"status":a.status,"error":a.error,"version":a.version,"metadata":a.metadata_json,"created_at":a.created_at.isoformat() if a.created_at else None}
-def serialize_draft(d): return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"status":d.status,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"published_at":d.published_at,"created_at":d.created_at}
+def serialize_asset(a): return {"id":a.id,"type":a.type,"title":a.title,"description":a.description,"expedition_id":a.expedition_id,"expedition":a.expedition.name if a.expedition else None,"region":a.region,"station":a.station,"year":a.year,"file_key":a.file_key,"thumb_key":a.thumb_key,"external_url":a.external_url,"status":a.status,"error":a.error,"version":a.version,"metadata":a.metadata_json,"created_at":a.created_at.isoformat() if a.created_at else None}
+def serialize_draft(d): return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at}
+def serialize_public_draft(d,db):
+    sources=[]
+    for citation in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==d.id)):
+        asset=db.get(Asset,citation.asset_id) if citation.asset_id else None
+        sources.append({"asset_id":citation.asset_id,"chunk_id":citation.chunk_id,"title":asset.title if asset else None,"url":asset.external_url if asset else None,"claim_text":citation.claim_text,"span_text":citation.span_text,"supported":citation.supported})
+    return {**serialize_draft(d),"sources":sources}
 
 @app.get("/health")
 def health(db:Session=Depends(get_db)):
@@ -87,9 +122,10 @@ def create_user(data:UserIn,db:Session=Depends(get_db),u=Depends(require_roles("
 def users(db:Session=Depends(get_db),u=Depends(require_roles("admin"))): return [{"id":x.id,"email":x.email,"role":x.role,"is_active":x.is_active} for x in db.scalars(select(User).order_by(User.id))]
 
 @app.get("/api/expeditions")
-def expeditions(db:Session=Depends(get_db)): return [{"id":x.id,"name":x.name,"year":x.year,"region":x.region,"stations":x.stations,"description":x.description} for x in db.scalars(select(Expedition).order_by(Expedition.year.desc()))]
+def expeditions(db:Session=Depends(get_db)): return [{"id":x.id,"name":x.name,"year":x.year,"region":x.region,"start_date":x.start_date,"end_date":x.end_date,"stations":x.stations,"description":x.description} for x in db.scalars(select(Expedition).order_by(Expedition.year.desc()))]
 @app.post("/api/expeditions",status_code=201)
 def add_expedition(data:ExpeditionIn,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
+    if data.start_date and data.end_date and data.start_date>data.end_date:raise HTTPException(422,"start_date must not be after end_date")
     row=Expedition(**data.model_dump());db.add(row);db.commit();db.refresh(row);return row
 @app.get("/api/expeditions/{eid}")
 def expedition(eid:int,db:Session=Depends(get_db)):
@@ -97,11 +133,12 @@ def expedition(eid:int,db:Session=Depends(get_db)):
     if not row: raise HTTPException(404,"Expedition not found")
     return row
 @app.get("/api/assets")
-def assets(type:str|None=None,expedition_id:int|None=None,region:str|None=None,year:int|None=None,status:str="ready",page:int=1,page_size:int=24,db:Session=Depends(get_db)):
+def assets(type:str|None=None,expedition_id:int|None=None,region:str|None=None,station:str|None=None,year:int|None=None,status:str="ready",page:int=1,page_size:int=24,db:Session=Depends(get_db)):
     q=select(Asset).where(Asset.status==status)
     if type: q=q.where(Asset.type==type)
     if expedition_id: q=q.where(Asset.expedition_id==expedition_id)
     if region: q=q.where(Asset.region.ilike(f"%{region}%"))
+    if station:q=q.where(Asset.station.ilike(f"%{station}%"))
     if year: q=q.where(Asset.year==year)
     total=db.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows=db.scalars(q.order_by(Asset.created_at.desc()).offset((max(page,1)-1)*min(page_size,100)).limit(min(page_size,100))).all()
@@ -121,12 +158,19 @@ def add_asset(data:AssetIn,db:Session=Depends(get_db),u=Depends(require_roles("a
 def get_asset(aid:int,db:Session=Depends(get_db)):
     a=db.get(Asset,aid)
     if not a or a.status!="ready": raise HTTPException(404,"Asset not found")
-    db.add(ViewLog(asset_id=aid));db.commit();return serialize_asset(a)
+    chunks=db.scalars(select(Chunk).where(Chunk.asset_id==aid).order_by(Chunk.idx,Chunk.id)).all()
+    versions=db.scalars(select(AssetVersion).where(AssetVersion.asset_id==aid).order_by(AssetVersion.version.desc())).all()
+    expedition={"id":a.expedition.id,"name":a.expedition.name,"stations":a.expedition.stations or []} if a.expedition else None
+    version_rows=[{"version":row.version,"timestamp":row.created_at.isoformat() if row.created_at else None,"title":row.snapshot_json.get("title",a.title)} for row in versions]
+    if not version_rows:
+        version_rows=[{"version":a.version,"timestamp":a.updated_at.isoformat() if a.updated_at else None,"title":a.title}]
+    db.add(ViewLog(asset_id=aid));db.commit()
+    return {"asset":serialize_asset(a),"chunks":[{"id":chunk.id,"page":chunk.page,"text":chunk.text} for chunk in chunks],"versions":version_rows,"expedition":expedition}
 @app.patch("/api/assets/{aid}")
 def update_asset(aid:int,data:dict,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     a=db.get(Asset,aid)
     if not a: raise HTTPException(404,"Asset not found")
-    allowed={"type","title","description","expedition_id","region","year","external_url","metadata_json"}
+    allowed={"type","title","description","expedition_id","region","station","year","external_url","metadata_json"}
     if "type" in data and data["type"] not in ASSET_TYPES: raise HTTPException(422,"Unsupported asset type")
     for k,v in data.items():
         if k in allowed: setattr(a,k,v)
@@ -137,7 +181,7 @@ def delete_asset(aid:int,db:Session=Depends(get_db),u=Depends(require_roles("adm
     if not a: raise HTTPException(404,"Asset not found")
     db.delete(a);db.commit()
 @app.post("/api/ingest/upload",status_code=202)
-async def upload(file:UploadFile=File(...),title:str=Form(...),type:str=Form("report"),description:str=Form(""),expedition_id:int|None=Form(None),db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
+async def upload(file:UploadFile=File(...),title:str=Form(...),type:str=Form("report"),description:str=Form(""),expedition_id:int|None=Form(None),station:str|None=Form(None),region:str|None=Form(None),year:int|None=Form(None),db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     if type not in ASSET_TYPES: raise HTTPException(422,"Unsupported asset type")
     suffix=(file.filename or "").lower().rsplit(".",1)[-1] if "." in (file.filename or "") else ""
     allowed={"pdf","docx","csv","nc","nc4","jpg","jpeg","png","webp","tif","tiff","mp4","txt"}
@@ -147,7 +191,7 @@ async def upload(file:UploadFile=File(...),title:str=Form(...),type:str=Form("re
     signatures={"pdf":data.startswith(b"%PDF-"),"jpg":data.startswith(b"\xff\xd8\xff"),"jpeg":data.startswith(b"\xff\xd8\xff"),"png":data.startswith(b"\x89PNG\r\n\x1a\n"),"webp":data.startswith(b"RIFF") and data[8:12]==b"WEBP","mp4":len(data)>12 and data[4:8]==b"ftyp","nc":data.startswith((b"CDF\x01",b"CDF\x02",b"\x89HDF\r\n\x1a\n")),"nc4":data.startswith((b"CDF\x01",b"CDF\x02",b"\x89HDF\r\n\x1a\n")),"docx":data.startswith(b"PK\x03\x04"),"csv":True,"txt":True,"tif":data.startswith((b"II*\x00",b"MM\x00*")),"tiff":data.startswith((b"II*\x00",b"MM\x00*"))}
     if not signatures.get(suffix,False):raise HTTPException(415,"File content does not match its extension")
     key=store_file(data,suffix,file.content_type or "application/octet-stream")
-    a=Asset(type=type,title=title,description=description,expedition_id=expedition_id,file_key=key,status="processing",created_by=u.id,metadata_json={"filename":file.filename,"content_type":file.content_type,"size":len(data)})
+    a=Asset(type=type,title=title,description=description,expedition_id=expedition_id,station=station,region=region,year=year,file_key=key,status="processing",created_by=u.id,metadata_json={"filename":file.filename,"content_type":file.content_type,"size":len(data)})
     db.add(a);db.commit();db.refresh(a)
     queued=enqueue_ingestion(a.id,key,suffix)
     if not queued:
@@ -175,7 +219,7 @@ def retry_ingestion(asset_id:int,db:Session=Depends(get_db),u=Depends(require_ro
     return {"asset_id":a.id,"status":a.status,"queued":True}
 
 @app.get("/api/search")
-def search(q:str="",type:str|None=None,expedition:str|None=None,year_from:int|None=None,year_to:int|None=None,region:str|None=None,tags:str|None=None,sort:str="relevance",page:int=1,db:Session=Depends(get_db)):
+def search(q:str="",type:str|None=None,expedition:str|None=None,year_from:int|None=None,year_to:int|None=None,region:str|None=None,station:str|None=None,tags:str|None=None,sort:str="relevance",page:int=1,db:Session=Depends(get_db)):
     stmt=select(Asset).where(Asset.status=="ready")
     if type: stmt=stmt.where(Asset.type==type)
     if expedition:
@@ -184,6 +228,7 @@ def search(q:str="",type:str|None=None,expedition:str|None=None,year_from:int|No
     if year_from: stmt=stmt.where(Asset.year>=year_from)
     if year_to: stmt=stmt.where(Asset.year<=year_to)
     if region: stmt=stmt.where(Asset.region.ilike(f"%{region}%"))
+    if station:stmt=stmt.where(Asset.station.ilike(f"%{station}%"))
     if tags:
         tag_names=[x.strip().lower() for x in tags.split(",") if x.strip()]
         matched=db.scalars(select(AssetTag.asset_id).join(Tag,Tag.id==AssetTag.tag_id).where(func.lower(Tag.name).in_(tag_names))).all()
@@ -208,7 +253,7 @@ def search(q:str="",type:str|None=None,expedition:str|None=None,year_from:int|No
         else: score=0.4*kw+0.1*rec
         scored.append((score,a))
     scored.sort(key=lambda x:x[0],reverse=True)
-    db.add(SearchLog(query=q,filters_json={"type":type,"region":region,"year_from":year_from,"year_to":year_to},n_results=len(scored)));db.commit()
+    db.add(SearchLog(query=q,filters_json={"type":type,"region":region,"station":station,"year_from":year_from,"year_to":year_to},n_results=len(scored)));db.commit()
     start=(max(page,1)-1)*20
     return {"items":[{**serialize_asset(a),"score":round(s,4)} for s,a in scored[start:start+20]],"total":len(scored),"page":page,"page_size":20,"mode":"keyword+local semantic hashing embeddings+recency"}
 @app.get("/api/search/images")
@@ -231,36 +276,61 @@ def draft_detail(did:int,db:Session=Depends(get_db),u=Depends(require_roles("adm
     d=db.get(Draft,did)
     if not d:raise HTTPException(404,"Draft not found")
     return {**serialize_draft(d),"citations":[{"claim_text":c.claim_text,"chunk_id":c.chunk_id,"asset_id":c.asset_id,"span_text":c.span_text,"supported":c.supported} for c in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==did))],"comments":[{"author_id":c.author_id,"body":c.body,"action":c.action,"created_at":c.created_at} for c in db.scalars(select(DraftComment).where(DraftComment.draft_id==did))]}
+@app.post("/api/editorial/drafts/{did}/comments",status_code=201)
+def add_draft_comment(did:int,data:EditorialCommentIn,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):
+    d=db.get(Draft,did)
+    if not d:raise HTTPException(404,"Draft not found")
+    comment=DraftComment(draft_id=did,author_id=u.id,body=data.comment.strip(),action="comment")
+    if not comment.body:raise HTTPException(422,"Comment cannot be empty")
+    db.add(comment);db.commit();db.refresh(comment)
+    return {"id":comment.id,"body":comment.body,"action":comment.action,"created_at":comment.created_at,"author_id":u.id}
 @app.post("/api/editorial/drafts/{did}/transition")
 def transition(did:int,data:TransitionIn,db:Session=Depends(get_db),u=Depends(current_user)):
     d=db.get(Draft,did)
     if not d:raise HTTPException(404,"Draft not found")
-    rules={"submit":({"draft","changes_requested"},{"admin","editor"},"in_review"),"approve":({"in_review"},{"admin","reviewer"},"approved"),"request_changes":({"in_review"},{"admin","reviewer"},"changes_requested"),"reject":({"in_review"},{"admin","reviewer"},"rejected"),"schedule":({"approved"},{"admin","editor"},"scheduled"),"publish":({"approved"},{"admin"},"published"),"unschedule":({"scheduled"},{"admin","editor"},"approved")}
+    rules={"submit":({"draft","changes_requested"},{"admin","editor"},"in_review"),"approve":({"in_review"},{"admin","reviewer"},"approved"),"request_changes":({"in_review"},{"admin","reviewer"},"changes_requested"),"reject":({"in_review"},{"admin","reviewer"},"rejected"),"schedule":({"approved"},{"admin","editor"},"scheduled"),"publish":({"approved"},{"admin"},"published"),"unschedule":({"scheduled"},{"admin","editor"},"approved"),"unpublish":({"published"},{"admin"},"approved"),"archive":({"draft","changes_requested","approved","scheduled","published"},{"admin"},"archived")}
     rule=rules.get(data.action)
     if not u or not rule or d.status not in rule[0] or u.role not in rule[1]:raise HTTPException(409,"Transition not allowed for this state or role")
+    if d.ai_assisted and data.action in {"submit","approve","publish","schedule"}:
+        citations=db.scalars(select(DraftCitation).where(DraftCitation.draft_id==did)).all()
+        if not citations or any(not citation.supported or not citation.span_text for citation in citations):raise HTTPException(422,"AI-assisted drafts require supported source citations before review or publication")
     d.status=rule[2]
     if data.action=="schedule":
-        from datetime import datetime
         if not data.scheduled_at:raise HTTPException(422,"scheduled_at required")
-        d.scheduled_at=datetime.fromisoformat(data.scheduled_at.replace("Z","+00:00"))
+        try:d.scheduled_at=datetime.fromisoformat(data.scheduled_at.replace("Z","+00:00"))
+        except ValueError:raise HTTPException(422,"scheduled_at must be an ISO-8601 date-time")
+        if d.scheduled_at.tzinfo is None or d.scheduled_at<=now():raise HTTPException(422,"scheduled_at must be a future date-time with a timezone")
     if d.status=="published":d.published_at=now()
     if data.action in {"approve","request_changes","reject"}:d.reviewer_id=u.id
+    if data.action=="approve":d.approved_at=now()
+    if data.action=="unpublish":d.published_at=None;d.scheduled_at=None
+    d.updated_at=now()
     db.add(DraftComment(draft_id=did,author_id=u.id,body=data.comment,action=data.action));db.commit();db.refresh(d);return serialize_draft(d)
 @app.get("/api/editorial/calendar")
 def calendar(month:str|None=None,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):return [serialize_draft(d) for d in db.scalars(select(Draft).where(Draft.scheduled_at.is_not(None)).order_by(Draft.scheduled_at))]
 @app.get("/api/stories")
-def stories(db:Session=Depends(get_db)):return [serialize_draft(d) for d in db.scalars(select(Draft).where(Draft.kind=="article",Draft.status=="published").order_by(Draft.published_at.desc()))]
+def stories(db:Session=Depends(get_db)):return [serialize_public_draft(d,db) for d in db.scalars(select(Draft).where(Draft.kind=="article",Draft.status=="published").order_by(Draft.published_at.desc()))]
 @app.get("/api/stories/{sid}")
 def story(sid:int,db:Session=Depends(get_db)):
     d=db.get(Draft,sid)
     if not d or d.kind!="article" or d.status!="published":raise HTTPException(404,"Story not found")
-    return serialize_draft(d)
+    return serialize_public_draft(d,db)
 @app.post("/api/generate")
 def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
-    ids=payload.get("asset_ids") or []
+    allowed_formats={"article","twitter","instagram","facebook","post","reel","story"}
+    formats=payload.get("formats") or ["article"]
+    if not isinstance(formats,list) or not formats or any(kind not in allowed_formats for kind in formats):
+        raise HTTPException(422,{"detail":"formats must be a non-empty list of supported outreach formats","supported":sorted(allowed_formats)})
+    formats=list(dict.fromkeys(formats))
+    raw_ids=payload.get("asset_ids") or []
+    if not isinstance(raw_ids,list):raise HTTPException(422,"asset_ids must be a list of asset IDs")
+    try:
+        ids=[int(asset_id) for asset_id in raw_ids]
+        expedition_id=int(payload["expedition_id"]) if payload.get("expedition_id") not in (None,"") else None
+    except (TypeError,ValueError):raise HTTPException(422,"asset_ids and expedition_id must contain valid integer IDs")
     stmt=select(Chunk,Asset).join(Asset,Chunk.asset_id==Asset.id).where(Asset.status=="ready")
     if ids:stmt=stmt.where(Asset.id.in_(ids))
-    elif payload.get("expedition_id"):stmt=stmt.where(Asset.expedition_id==payload["expedition_id"])
+    elif expedition_id:stmt=stmt.where(Asset.expedition_id==expedition_id)
     elif payload.get("theme"):stmt=stmt.where(or_(Asset.title.ilike(f"%{payload['theme']}%"),Chunk.text.ilike(f"%{payload['theme']}%")))
     else:raise HTTPException(422,"Provide asset_ids, expedition_id, or theme")
     rows=db.execute(stmt.limit(12)).all()
@@ -268,19 +338,62 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
     citations=[]; snippets=[]
     for i,(c,a) in enumerate(rows,1):
         excerpt=c.text[:700];snippets.append(f"[{i}] {excerpt}");citations.append((c,a))
-    title=f"Polar science: {payload.get('theme') or rows[0][1].title}"
-    body="## Introduction\n\nThis draft is grounded in the selected archive sources and requires editorial review.\n\n## Key findings\n\n"+"\n\n".join(f"{a.title}: {c.text[:350]}" for c,a in citations[:4])+"\n\n## Sources\n\n"+"\n".join(f"- {a.title}" for c,a in citations)
     citation_rows=[{"chunk_id":c.id,"asset_id":a.id,"asset_title":a.title,"text":c.text} for c,a in citations]
-    if settings.llm_provider=="ollama":
-        try:
-            generated=generate_locally(settings.model_name,settings.model_base_url,citation_rows,(payload.get("formats") or ["article"])[0],payload.get("tone","general_public"),payload.get("theme",""))
-            title=generated["title"];body=generated["body_md"];citation_rows=generated["citations"]
-        except Exception as exc:
-            raise HTTPException(502,f"Local Ollama generation failed citation validation: {str(exc)[:300]}")
-    d=Draft(kind=(payload.get("formats") or ["article"])[0],title=title,body_md=body,tone=payload.get("tone","general_public"),status="draft",created_by=u.id);db.add(d);db.flush()
-    for item in citation_rows:db.add(DraftCitation(draft_id=d.id,claim_text=item.get("claim_text",item.get("text", "")[:350]),chunk_id=item["chunk_id"],asset_id=item["asset_id"],span_text=item.get("span_text",item.get("text","")[:500]),supported=True))
-    db.commit();db.refresh(d)
-    return {**serialize_draft(d),"provider":settings.llm_provider,"notice":"Draft is grounded in selected source chunks and citation spans were validated.","citations_count":len(citation_rows),"citations":[{"claim_text":x.get("claim_text",x.get("text","" )[:350]),"chunk_id":x["chunk_id"],"asset_id":x["asset_id"],"span_text":x.get("span_text",x.get("text","" )[:500]),"supported":True} for x in citation_rows]}
+    if settings.llm_provider=="openrouter" and not settings.model_api_key:
+        raise HTTPException(503,"OpenRouter is selected but MODEL_API_KEY is not configured")
+    output=[];linked_content={}
+    try:
+        for kind in formats:
+            title=f"{payload.get('theme') or rows[0][1].title} — {kind.title()}"
+            excerpts="\n\n".join(f"> {a.title}: {c.text[:500]}" for c,a in citations[:4])
+            if kind=="story":
+                body="## Slide 1 — What the sources say\n\n"+"\n\n".join(c.text[:250] for c,a in citations[:4])
+            elif kind=="reel":
+                body="## Hook\n\nA short science explainer based only on the selected source material.\n\n## Voice-over / scenes\n\n"+excerpts+"\n\n## On-screen source cards\n\n"+"\n".join(f"- {a.title}" for c,a in citations[:4])
+            elif kind in {"post","instagram","twitter","facebook"}:
+                body="A source-grounded outreach draft for editorial review.\n\n"+excerpts+"\n\n## Sources\n\n"+"\n".join(f"- {a.title}" for c,a in citations[:4])
+            else:
+                body="## Introduction\n\nThis draft uses only retrieved repository passages and requires scientific/editorial review.\n\n## Source passages\n\n"+excerpts+"\n\n## Sources\n\n"+"\n".join(f"- {a.title}" for c,a in citations[:4])
+            selected_citations=citation_rows
+            if settings.llm_provider=="ollama":
+                generated=generate_locally(settings.model_name,settings.model_base_url,citation_rows,kind,payload.get("tone","general_public"),payload.get("theme",""))
+                title=generated["title"];body=generated["body_md"];selected_citations=generated["citations"]
+            elif settings.llm_provider=="openrouter":
+                generated=generate_openrouter(settings.model_name,settings.model_api_key,citation_rows,kind,payload.get("tone","general_public"),payload.get("theme",""))
+                title=generated["title"];body=generated["body_md"];selected_citations=generated["citations"]
+            d=Draft(kind=kind,title=title,body_md=body,tone=payload.get("tone","general_public"),status="draft",ai_assisted=True,created_by=u.id,expedition_id=expedition_id);db.add(d);db.flush()
+            for item in selected_citations:
+                chunk=db.get(Chunk,item["chunk_id"]);span=item.get("span_text",item.get("text",""))
+                supported=bool(chunk and span and span in chunk.text)
+                if not supported:raise ValueError("A generated claim did not pass exact source-span validation")
+                db.add(DraftCitation(draft_id=d.id,claim_text=item.get("claim_text",item.get("text","")[:350]),chunk_id=chunk.id,asset_id=item["asset_id"],span_text=span,supported=True))
+            if kind in {"story","post","reel"}:
+                from .modules.feed import FeedCitation, FeedItem, OutreachStory, StoryCitation, StorySlide
+                if kind=="story":
+                    story=OutreachStory(title=title,summary=body[:500],status="draft",expedition_id=expedition_id,ai_assisted=True,source_draft_id=d.id,created_by=u.id)
+                    db.add(story);db.flush()
+                    slide=StorySlide(story_id=story.id,position=0,kind="text",title=title,body=body[:3000],duration_seconds=7)
+                    db.add(slide);db.flush()
+                    for source in selected_citations:
+                        db.add(StoryCitation(story_id=story.id,slide_id=slide.id,asset_id=source["asset_id"],chunk_id=source["chunk_id"],claim_text=source.get("claim_text",source.get("text","")[:350]),span_text=source.get("span_text",source.get("text","")),label=source.get("asset_title", ""),supported=True))
+                    linked_content[d.id]={"type":"story","id":story.id}
+                else:
+                    first_asset=db.get(Asset,selected_citations[0]["asset_id"]) if selected_citations else None
+                    media_asset=first_asset if first_asset and first_asset.type in {"photo","video"} else None
+                    item=FeedItem(kind=kind,caption=body,title=title,description="AI-assisted source-grounded draft; review before publication.",expedition_id=payload.get("expedition_id"),region=first_asset.region if first_asset else None,station=first_asset.station if first_asset else None,primary_asset_id=media_asset.id if media_asset else None,source="auto",status="draft",ai_assisted=True,created_by=u.id)
+                    db.add(item);db.flush()
+                    for source in selected_citations:
+                        db.add(FeedCitation(item_id=item.id,asset_id=source["asset_id"],chunk_id=source["chunk_id"],claim_text=source.get("claim_text",source.get("text","")[:350]),span_text=source.get("span_text",source.get("text","")),label=source.get("asset_title", ""),supported=True))
+                    linked_content[d.id]={"type":kind,"id":item.id}
+            output.append(d)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if isinstance(exc,HTTPException):raise
+        if settings.llm_provider in {"ollama","openrouter"}:raise HTTPException(502,f"{settings.llm_provider.title()} generation failed: {str(exc)[:300]}")
+        raise HTTPException(422,f"Draft generation failed source validation: {str(exc)[:300]}")
+    for draft in output:db.refresh(draft)
+    return [{**serialize_draft(d),"linked_content":linked_content.get(d.id),"provider":settings.llm_provider,"notice":"Draft uses retrieved repository sources; exact citation spans are validated. Editorial approval is required before publication.","citations_count":db.scalar(select(func.count(DraftCitation.id)).where(DraftCitation.draft_id==d.id)) or 0,"citations":[{"claim_text":c.claim_text,"chunk_id":c.chunk_id,"asset_id":c.asset_id,"span_text":c.span_text,"supported":c.supported} for c in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==d.id))]} for d in output]
 @app.get("/api/config")
 def get_config(db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):return {x.key:x.value_json for x in db.scalars(select(PortalConfig))}
 @app.put("/api/config/{key}")

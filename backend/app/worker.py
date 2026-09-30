@@ -21,13 +21,15 @@ def process_asset(asset_id:int,key:str,suffix:str):
             asset.status="failed";asset.error=str(e)[:1000];db.commit();raise
 
 def scheduler_tick():
-    from .modules.feed import FeedItem
+    from .modules.feed import FeedItem, OutreachStory
     with SessionLocal() as db:
         now=datetime.now(timezone.utc)
         rows=db.scalars(select(Draft).where(Draft.status=="scheduled",Draft.scheduled_at<=now)).all()
         for d in rows:d.status="published";d.published_at=now
         feed_rows=db.scalars(select(FeedItem).where(FeedItem.status=="scheduled",FeedItem.scheduled_at<=now)).all()
         for item in feed_rows:item.status="published";item.published_at=now
+        story_rows=db.scalars(select(OutreachStory).where(OutreachStory.status=="scheduled",OutreachStory.scheduled_at<=now)).all()
+        for story in story_rows:story.status="published";story.published_at=now;story.updated_at=now
         published=db.scalars(select(FeedItem).where(FeedItem.status=="published")).all()
         for item in published:
             age=max((now-item.published_at.replace(tzinfo=timezone.utc)).total_seconds()/86400,0) if item.published_at else 0
@@ -35,7 +37,7 @@ def scheduler_tick():
             engagement=min((item.like_count+2*item.share_count)/max(item.view_count,20),1.0)
             item.rank_score=0.5*recency+0.3*engagement+0.2*item.editorial_boost
         db.commit()
-        return len(rows)+len(feed_rows)
+        return len(rows)+len(feed_rows)+len(story_rows)
 
 def main():
     import threading

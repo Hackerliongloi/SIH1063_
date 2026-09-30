@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- this module adapts untyped JSON responses into application data */
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 const mockAssets = [
@@ -120,7 +121,7 @@ function mockResponseFor(endpoint: string): any {
   return null;
 }
 
-export async function fetchFromAPI(endpoint: string, options?: RequestInit) {
+export async function fetchFromAPI(endpoint: string, options?: RequestInit, allowDemoFallback = true) {
   const url = `${API_BASE}${endpoint}`;
 
   try {
@@ -134,12 +135,14 @@ export async function fetchFromAPI(endpoint: string, options?: RequestInit) {
     });
 
     if (!res.ok) {
-      throw new Error(`API error ${res.status}: ${res.statusText}`);
+      const payload = await res.json().catch(() => null);
+      const detail = typeof payload?.detail === "string" ? payload.detail : payload?.detail?.detail;
+      throw new Error(detail || payload?.message || `Request failed (${res.status}). Please try again.`);
     }
 
     return await res.json();
   } catch (err) {
-    const fallback = mockResponseFor(endpoint);
+    const fallback = allowDemoFallback ? mockResponseFor(endpoint) : null;
     if (fallback !== null) {
       return fallback;
     }
@@ -162,6 +165,7 @@ function listFromResponse(value: unknown): any[] {
 export const api = {
   // Expeditions
   getExpeditions: () => fetchFromAPI("/expeditions"),
+  getLiveExpeditions: () => fetchFromAPI("/expeditions", undefined, false),
   getExpedition: (id: string) => fetchFromAPI(`/expeditions/${id}`),
 
   // Assets
@@ -215,6 +219,7 @@ export const api = {
       total: response?.total ?? listFromResponse(response).length,
     };
   },
+  getLiveAssets: async (status = "ready") => listFromResponse(await fetchFromAPI(`/assets?status=${encodeURIComponent(status)}`, undefined, false)),
 
   // Grounded Generation
   generateContent: async (payload: {
@@ -247,8 +252,12 @@ export const api = {
   ) =>
     fetchFromAPI(`/editorial/drafts/${id}/transition`, {
       method: "POST",
-      body: JSON.stringify({ action: action === "resubmit" ? "submit" : action, comment, scheduled_at }),
+      body: JSON.stringify({ action: action === "resubmit" ? "submit" : action === "changes" ? "request_changes" : action, comment, scheduled_at }),
     }),
+  addDraftComment: (id: string, comment: string) => fetchFromAPI(`/editorial/drafts/${id}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ comment }),
+  }),
   getCalendar: (month?: string) => fetchFromAPI(`/editorial/calendar${month ? `?month=${month}` : ""}`),
 
   // Stories

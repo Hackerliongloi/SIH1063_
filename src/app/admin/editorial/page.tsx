@@ -10,58 +10,94 @@ import {
   Send,
   Calendar,
   MessageSquare,
-  FileText,
-  UserCheck,
   RefreshCw,
   Sparkles,
   ArrowRight,
-  ShieldCheck,
   Eye,
 } from "lucide-react";
 import { TwitterIcon, InstagramIcon, FacebookIcon } from "@/components/SocialIcons";
 import { api } from "@/lib/api";
 
+type DraftComment = { id?: string | number; author_name?: string; body: string; created_at?: string };
+type DraftRecord = { id: string | number; kind: string; title: string; body_md?: string; tone?: string; status: string; created_by?: string | number; citations?: unknown[]; comments?: DraftComment[]; scheduled_at?: string | null; expedition_id?: string | number | null };
+type CalendarRecord = DraftRecord;
+
 export default function EditorialDeskPage() {
-  const [drafts, setDrafts] = useState<any[]>([]);
+  const [drafts, setDrafts] = useState<DraftRecord[]>([]);
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
+  const [selectedDraft, setSelectedDraft] = useState<DraftRecord | null>(null);
   const [activeTab, setActiveTab] = useState<"board" | "calendar" | "preview">("board");
-  const [calendarItems, setCalendarItems] = useState<any[]>([]);
+  const [calendarItems, setCalendarItems] = useState<CalendarRecord[]>([]);
   const [commentInput, setCommentInput] = useState("");
+  const [scheduledAt, setScheduledAt] = useState("");
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [tickResult, setTickResult] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadAll = async () => {
+    setLoadError(null);
     try {
       const [draftsRes, calRes] = await Promise.all([
         api.getDrafts(),
         api.getCalendar(),
       ]);
-      setDrafts(draftsRes || []);
-      setCalendarItems(calRes?.items || []);
-      if (!selectedDraftId && draftsRes?.length > 0) {
-        setSelectedDraftId(draftsRes[0].id);
+      const draftList = Array.isArray(draftsRes) ? draftsRes as DraftRecord[] : [];
+      const calendarList = Array.isArray(calRes) ? calRes as CalendarRecord[] : [];
+      setDrafts(draftList);
+      setCalendarItems(calendarList);
+      const nextId = selectedDraftId || draftList[0]?.id;
+      if (nextId) {
+        const detail = await api.getDraft(String(nextId));
+        setSelectedDraft(detail as DraftRecord);
+        setSelectedDraftId(String(nextId));
+      } else {
+        setSelectedDraft(null);
       }
     } catch (err) {
       console.error("Failed to load editorial data", err);
+      setLoadError(err instanceof Error ? err.message : "Editorial data could not be loaded.");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadAll();
+    const timer = window.setTimeout(() => { void loadAll(); }, 0);
+    return () => window.clearTimeout(timer);
+    // Initial load only; mutations explicitly refresh the desk.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const selectDraft = async (id: string) => {
+    setSelectedDraftId(id);
+    try {
+      setSelectedDraft(await api.getDraft(id) as DraftRecord);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Draft details could not be loaded.");
+    }
+  };
 
   const handleAction = async (action: string) => {
     if (!selectedDraftId) return;
+    if (action === "comment" && !commentInput.trim()) {
+      setLoadError("Enter an editorial note before adding a comment.");
+      return;
+    }
+    if (action === "schedule" && !scheduledAt) {
+      setLoadError("Choose a publication date and time before scheduling.");
+      return;
+    }
     setActionLoading(true);
     try {
-      await api.transitionDraft(selectedDraftId, action, commentInput || undefined);
+      if (action === "comment") await api.addDraftComment(selectedDraftId, commentInput.trim());
+      else await api.transitionDraft(selectedDraftId, action, commentInput || undefined, action === "schedule" ? new Date(scheduledAt).toISOString() : undefined);
       setCommentInput("");
+      setScheduledAt("");
       await loadAll();
     } catch (err) {
       console.error(`Transition ${action} failed:`, err);
+      setLoadError(err instanceof Error ? err.message : "The editorial action could not be completed.");
     } finally {
       setActionLoading(false);
     }
@@ -75,20 +111,19 @@ export default function EditorialDeskPage() {
       setTimeout(() => setTickResult(null), 5000);
     } catch (e) {
       console.error("Worker tick error", e);
+      setLoadError(e instanceof Error ? e.message : "The publishing worker could not be run.");
     }
   };
 
-  const selectedDraft = drafts.find((d) => d.id === selectedDraftId);
-
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
-      draft: "bg-slate-800 text-slate-300 border-slate-700",
-      in_review: "bg-amber-950 text-amber-300 border-amber-800",
-      approved: "bg-teal-950 text-teal-300 border-teal-800",
-      changes_requested: "bg-orange-950 text-orange-300 border-orange-800",
-      rejected: "bg-rose-950 text-rose-300 border-rose-800",
-      scheduled: "bg-indigo-950 text-indigo-300 border-indigo-800",
-      published: "bg-emerald-950 text-emerald-300 border-emerald-800 font-bold",
+      draft: "bg-slate-100 text-slate-700 border-slate-300",
+      in_review: "bg-amber-50 text-amber-800 border-amber-200",
+      approved: "bg-teal-50 text-teal-800 border-teal-200",
+      changes_requested: "bg-orange-50 text-orange-800 border-orange-200",
+      rejected: "bg-rose-50 text-rose-800 border-rose-200",
+      scheduled: "bg-indigo-50 text-indigo-800 border-indigo-200",
+      published: "bg-emerald-50 text-emerald-800 border-emerald-200 font-bold",
     };
     return (
       <span
@@ -105,15 +140,15 @@ export default function EditorialDeskPage() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* Editorial Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="inline-flex items-center gap-2 px-3 py-0.5 rounded-full bg-teal-950/80 border border-teal-800 text-teal-300 text-xs font-mono">
+      <div className="space-y-1">
+          <div className="inline-flex items-center gap-2 px-3 py-0.5 rounded-full bg-teal-50/80 border border-teal-200 text-teal-800 text-xs font-mono">
             <ClipboardList className="w-3.5 h-3.5" />
             TRACK E: EDITORIAL & DISSEMINATION DESK
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-[#143b5e] tracking-tight">
             Editorial Review & Publishing State Machine
           </h1>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-500">
             Enforces strict role governance: Draft → Review → Approved → Scheduled → Published in Indian Standard Time (IST).
           </p>
         </div>
@@ -122,28 +157,31 @@ export default function EditorialDeskPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={handleTickWorker}
-            className="px-3.5 py-2 rounded-xl bg-[#0b1726] border border-[#1b3149] hover:border-sky-500 text-sky-300 text-xs font-mono flex items-center gap-2 transition-all shadow-sm"
+            className="px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:border-sky-500 text-[#12679a] text-xs font-mono flex items-center gap-2 transition-all shadow-sm"
           >
-            <RefreshCw className="w-3.5 h-3.5 text-sky-400" />
+            <RefreshCw className="w-3.5 h-3.5 text-[#12679a]" />
             Tick Worker (Publish Scheduled)
           </button>
         </div>
       </div>
 
+      {loadError && <div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"><span>{loadError}</span><button type="button" onClick={() => { void loadAll(); }} className="shrink-0 font-semibold underline">Retry</button></div>}
+      {loading && <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500"><RefreshCw className="mr-2 inline h-4 w-4 animate-spin" />Loading editorial desk...</div>}
+
       {tickResult && (
-        <div className="p-3 bg-emerald-950/60 border border-emerald-800 rounded-xl text-xs font-mono text-emerald-300">
+        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-mono text-emerald-800">
           ✓ {tickResult}
         </div>
       )}
 
       {/* View Tabs */}
-      <div className="flex border-b border-[#18293d] gap-3">
+      <div className="flex border-b border-slate-200 gap-3">
         <button
           onClick={() => setActiveTab("board")}
           className={`pb-3 px-3 text-xs font-medium transition-colors border-b-2 flex items-center gap-2 ${
             activeTab === "board"
-              ? "border-sky-400 text-sky-300 font-semibold"
-              : "border-transparent text-slate-400 hover:text-slate-200"
+              ? "border-sky-400 text-[#12679a] font-semibold"
+              : "border-transparent text-slate-500 hover:text-slate-700"
           }`}
         >
           <ClipboardList className="w-4 h-4" />
@@ -153,8 +191,8 @@ export default function EditorialDeskPage() {
           onClick={() => setActiveTab("calendar")}
           className={`pb-3 px-3 text-xs font-medium transition-colors border-b-2 flex items-center gap-2 ${
             activeTab === "calendar"
-              ? "border-sky-400 text-sky-300 font-semibold"
-              : "border-transparent text-slate-400 hover:text-slate-200"
+              ? "border-sky-400 text-[#12679a] font-semibold"
+              : "border-transparent text-slate-500 hover:text-slate-700"
           }`}
         >
           <Calendar className="w-4 h-4" />
@@ -164,8 +202,8 @@ export default function EditorialDeskPage() {
           onClick={() => setActiveTab("preview")}
           className={`pb-3 px-3 text-xs font-medium transition-colors border-b-2 flex items-center gap-2 ${
             activeTab === "preview"
-              ? "border-sky-400 text-sky-300 font-semibold"
-              : "border-transparent text-slate-400 hover:text-slate-200"
+              ? "border-sky-400 text-[#12679a] font-semibold"
+              : "border-transparent text-slate-500 hover:text-slate-700"
           }`}
         >
           <Eye className="w-4 h-4" />
@@ -179,31 +217,31 @@ export default function EditorialDeskPage() {
           {/* Drafts List Column */}
           <div className="lg:col-span-5 space-y-3 max-h-[750px] overflow-y-auto pr-1">
             {drafts.map((d) => {
-              const isSelected = d.id === selectedDraftId;
+              const isSelected = String(d.id) === selectedDraftId;
               return (
                 <div
                   key={d.id}
-                  onClick={() => setSelectedDraftId(d.id)}
+                  onClick={() => { void selectDraft(String(d.id)); }}
                   className={`p-4 rounded-xl border text-xs cursor-pointer transition-all space-y-2.5 ${
                     isSelected
-                      ? "bg-[#0c1a2c] border-sky-500 shadow-md shadow-sky-950/50"
-                      : "bg-[#08121f] border-[#18293d] hover:border-slate-700"
+                      ? "bg-sky-50 border-sky-500 shadow-md shadow-sky-950/50"
+                      : "bg-slate-50 border-slate-200 hover:border-slate-700"
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-mono text-sky-400 uppercase text-[10px] font-bold">
+                    <span className="font-mono text-[#12679a] uppercase text-[10px] font-bold">
                       {d.kind}
                     </span>
                     {getStatusBadge(d.status)}
                   </div>
 
-                  <h3 className="font-bold text-white text-sm line-clamp-2 leading-snug">
+                  <h3 className="font-bold text-[#143b5e] text-sm line-clamp-2 leading-snug">
                     {d.title}
                   </h3>
 
-                  <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 pt-1 border-t border-[#142334]">
+                  <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 pt-1 border-t border-slate-200">
                     <span>By {d.created_by || "Editor"}</span>
-                    <span className="text-emerald-400">
+                    <span className="text-emerald-700">
                       {d.citations?.length || 0} Grounded Spans
                     </span>
                   </div>
@@ -217,32 +255,36 @@ export default function EditorialDeskPage() {
             {selectedDraft ? (
               <div className="polar-card rounded-2xl p-6 sm:p-8 space-y-6">
                 {/* Status Bar */}
-                <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#18293d]">
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200">
                   <div>
-                    <span className="font-mono text-xs text-slate-400 block mb-1">Current State:</span>
+                    <span className="font-mono text-xs text-slate-500 block mb-1">Current State:</span>
                     {getStatusBadge(selectedDraft.status)}
                   </div>
-                  <div className="text-right text-xs font-mono text-slate-400">
-                    <div>Format: <strong className="text-white uppercase">{selectedDraft.kind}</strong></div>
-                    <div>Tone: <strong className="text-white">{selectedDraft.tone}</strong></div>
+                  <div className="text-right text-xs font-mono text-slate-500">
+                    <div>Format: <strong className="text-[#143b5e] uppercase">{selectedDraft.kind}</strong></div>
+                    <div>Tone: <strong className="text-[#143b5e]">{selectedDraft.tone}</strong></div>
                   </div>
                 </div>
 
                 {/* Draft Content */}
                 <div className="space-y-3">
-                  <h2 className="text-xl font-bold text-white tracking-tight">
+                  <h2 className="text-xl font-bold text-[#143b5e] tracking-tight">
                     {selectedDraft.title}
                   </h2>
-                  <div className="p-4 bg-[#08121f] rounded-xl border border-[#142334] text-xs sm:text-sm text-slate-200 whitespace-pre-line leading-relaxed max-h-80 overflow-y-auto">
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs sm:text-sm text-slate-700 whitespace-pre-line leading-relaxed max-h-80 overflow-y-auto">
                     {selectedDraft.body_md}
                   </div>
                 </div>
 
                 {/* State Machine Transition Actions */}
-                <div className="space-y-3 pt-4 border-t border-[#18293d]">
-                  <h4 className="text-xs font-mono uppercase tracking-wider text-slate-300">
+                <div className="space-y-3 pt-4 border-t border-slate-200">
+                  <h4 className="text-xs font-mono uppercase tracking-wider text-slate-600">
                     Execute State Machine Transition:
                   </h4>
+
+                  {selectedDraft.status === "approved" && <label className="block max-w-sm text-xs font-semibold text-slate-700">Publication date and time
+                    <input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-800 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-100" />
+                  </label>}
 
                   <div className="flex flex-wrap gap-2">
                     {/* Submit for review */}
@@ -288,7 +330,7 @@ export default function EditorialDeskPage() {
                     )}
 
                     {/* Publish / Schedule */}
-                    {["approved", "draft"].includes(selectedDraft.status) && (
+                    {["approved"].includes(selectedDraft.status) && (
                       <>
                         <button
                           onClick={() => handleAction("publish")}
@@ -312,7 +354,7 @@ export default function EditorialDeskPage() {
                     {selectedDraft.status === "published" && (
                       <Link
                         href={`/stories/${selectedDraft.id}`}
-                        className="px-3 py-2 rounded-lg bg-emerald-950 border border-emerald-800 text-emerald-300 text-xs font-medium flex items-center gap-1.5"
+                        className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium flex items-center gap-1.5"
                       >
                         View Public Story Page <ArrowRight className="w-3.5 h-3.5" />
                       </Link>
@@ -326,11 +368,12 @@ export default function EditorialDeskPage() {
                       value={commentInput}
                       onChange={(e) => setCommentInput(e.target.value)}
                       placeholder="Add an editorial note or change request log..."
-                      className="flex-1 bg-[#08121f] border border-[#18293d] rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-sky-400"
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-[#143b5e] placeholder-slate-400 focus:outline-none focus:border-sky-400"
                     />
                     <button
                       onClick={() => handleAction("comment")}
-                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-xl font-mono"
+                      disabled={actionLoading}
+                      className="rounded-lg bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200 disabled:opacity-50"
                     >
                       Comment
                     </button>
@@ -339,22 +382,22 @@ export default function EditorialDeskPage() {
 
                 {/* Audit & Comments Trail */}
                 {selectedDraft.comments && selectedDraft.comments.length > 0 && (
-                  <div className="space-y-3 pt-4 border-t border-[#18293d]">
-                    <h4 className="text-xs font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                      <MessageSquare className="w-3.5 h-3.5 text-sky-400" />
+                  <div className="space-y-3 pt-4 border-t border-slate-200">
+                    <h4 className="text-xs font-mono uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                      <MessageSquare className="w-3.5 h-3.5 text-[#12679a]" />
                       Editorial Audit Trail & Comments ({selectedDraft.comments.length}):
                     </h4>
                     <div className="space-y-2">
-                      {selectedDraft.comments.map((c: any) => (
+                      {selectedDraft.comments.map((c, idx) => (
                         <div
-                          key={c.id}
-                          className="p-3 rounded-lg bg-[#08121f] border border-[#142334] text-xs space-y-1 font-mono"
+                          key={c.id ?? idx}
+                          className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs space-y-1 font-mono"
                         >
-                          <div className="flex items-center justify-between text-slate-400 text-[11px]">
-                            <span className="text-sky-300 font-semibold">{c.author_name || "Editorial Staff"}</span>
+                          <div className="flex items-center justify-between text-slate-500 text-[11px]">
+                            <span className="text-[#12679a] font-semibold">{c.author_name || "Editorial Staff"}</span>
                             <span>{c.created_at}</span>
                           </div>
-                          <p className="text-slate-200">{c.body}</p>
+                          <p className="text-slate-700">{c.body}</p>
                         </div>
                       ))}
                     </div>
@@ -362,7 +405,7 @@ export default function EditorialDeskPage() {
                 )}
               </div>
             ) : (
-              <div className="polar-card rounded-2xl p-16 text-center text-xs text-slate-400">
+              <div className="polar-card rounded-2xl p-16 text-center text-xs text-slate-500">
                 Select a draft from the left panel to review citations and transition states.
               </div>
             )}
@@ -374,35 +417,35 @@ export default function EditorialDeskPage() {
       {activeTab === "calendar" && (
         <div className="polar-card rounded-2xl p-6 sm:p-8 space-y-6">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-indigo-400" />
+            <h2 className="text-lg font-bold text-[#143b5e] tracking-tight flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-indigo-700" />
               Dissemination Publication Schedule (Indian Standard Time - Asia/Kolkata)
             </h2>
-            <span className="text-xs font-mono text-slate-400">UTC Stored • IST Displayed</span>
+            <span className="text-xs font-mono text-slate-500">UTC Stored • IST Displayed</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {calendarItems.map((item) => (
               <div
                 key={item.id}
-                className="bg-[#08121f] border border-[#18293d] rounded-xl p-4 space-y-2.5 flex flex-col justify-between"
+                className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5 flex flex-col justify-between"
               >
                 <div>
                   <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="uppercase text-sky-400 font-semibold">{item.kind}</span>
+                    <span className="uppercase text-[#12679a] font-semibold">{item.kind}</span>
                     {getStatusBadge(item.status)}
                   </div>
-                  <h4 className="font-bold text-white text-sm line-clamp-2 mt-1">
+                  <h4 className="font-bold text-[#143b5e] text-sm line-clamp-2 mt-1">
                     {item.title}
                   </h4>
-                  <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                    {item.expedition_name}
+                  <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                    {item.expedition_id ? `Expedition ${item.expedition_id}` : "General repository"}
                   </p>
                 </div>
 
-                <div className="pt-2 border-t border-[#142334] text-xs font-mono text-emerald-400 flex items-center gap-1.5">
+                <div className="pt-2 border-t border-slate-200 text-xs font-mono text-emerald-700 flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5" />
-                  <span>{item.date_ist}</span>
+                  <span>{item.scheduled_at ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date(item.scheduled_at)) : "Date pending"}</span>
                 </div>
               </div>
             ))}
@@ -415,27 +458,27 @@ export default function EditorialDeskPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Twitter / X Mock */}
           <div className="polar-card rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#18293d]">
-              <span className="font-mono text-xs text-sky-400 flex items-center gap-1.5 font-bold">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <span className="font-mono text-xs text-[#12679a] flex items-center gap-1.5 font-bold">
                 <TwitterIcon className="w-4 h-4" />
                 X / Twitter Simulator
               </span>
-              <span className="text-[10px] font-mono text-slate-400">@NCPOR_India</span>
+              <span className="text-[10px] font-mono text-slate-500">@NCPOR_India</span>
             </div>
 
-            <div className="p-4 bg-black rounded-xl border border-slate-800 space-y-3 text-xs text-slate-100 font-sans">
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs font-sans text-slate-700">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-sky-600 flex items-center justify-center font-bold text-white text-xs">
                   NP
                 </div>
                 <div>
-                  <div className="font-bold text-white flex items-center gap-1">
-                    NCPOR India <span className="text-sky-400">✓</span>
+                  <div className="font-bold text-[#143b5e] flex items-center gap-1">
+                    NCPOR India <span className="text-[#12679a]">✓</span>
                   </div>
-                  <div className="text-[11px] text-slate-400">@NCPOR_India</div>
+                  <div className="text-[11px] text-slate-500">@NCPOR_India</div>
                 </div>
               </div>
-              <p className="text-slate-200 leading-relaxed whitespace-pre-line">
+              <p className="text-slate-700 leading-relaxed whitespace-pre-line">
                 {selectedDraft?.kind === "twitter"
                   ? selectedDraft.body_md
                   : "1/3 ❄️ Live from Maitri Station! Scientists have logged 38 blizzard cycles while sustaining uninterrupted ozone column telemetry. Grounded in 43-IAE report."}
@@ -445,16 +488,16 @@ export default function EditorialDeskPage() {
 
           {/* Instagram Post Mock */}
           <div className="polar-card rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#18293d]">
-              <span className="font-mono text-xs text-rose-400 flex items-center gap-1.5 font-bold">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <span className="font-mono text-xs text-rose-700 flex items-center gap-1.5 font-bold">
                 <InstagramIcon className="w-4 h-4" />
                 Instagram Card Simulator
               </span>
-              <span className="text-[10px] font-mono text-slate-400">@ncpor.india</span>
+              <span className="text-[10px] font-mono text-slate-500">@ncpor.india</span>
             </div>
 
-            <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden space-y-3 text-xs">
-              <div className="h-44 bg-slate-900 relative">
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white text-xs">
+              <div className="relative h-44 bg-slate-100">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src="https://images.unsplash.com/photo-1531366936337-7c912a4589a7?auto=format&fit=crop&w=800&q=80"
@@ -463,8 +506,8 @@ export default function EditorialDeskPage() {
                 />
               </div>
               <div className="p-3 space-y-1.5">
-                <span className="font-bold text-white">ncpor.india</span>
-                <p className="text-slate-300 line-clamp-4 leading-relaxed">
+                <span className="font-bold text-[#143b5e]">ncpor.india</span>
+                <p className="text-slate-600 line-clamp-4 leading-relaxed">
                   {selectedDraft?.kind === "instagram"
                     ? selectedDraft.body_md
                     : "🌌 Curtains of emerald Aurora Australis over Bharati Station, Larsemann Hills! Verified by Antarctic space weather spectrometers."}
@@ -475,25 +518,25 @@ export default function EditorialDeskPage() {
 
           {/* Facebook Post Mock */}
           <div className="polar-card rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#18293d]">
-              <span className="font-mono text-xs text-indigo-400 flex items-center gap-1.5 font-bold">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <span className="font-mono text-xs text-indigo-700 flex items-center gap-1.5 font-bold">
                 <FacebookIcon className="w-4 h-4" />
                 Facebook Outreach Post
               </span>
-              <span className="text-[10px] font-mono text-slate-400">NCPOR Official</span>
+              <span className="text-[10px] font-mono text-slate-500">NCPOR Official</span>
             </div>
 
-            <div className="p-4 bg-[#0a1424] rounded-xl border border-indigo-950 space-y-3 text-xs">
+            <div className="p-4 bg-slate-50 rounded-xl border border-indigo-950 space-y-3 text-xs">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-full bg-indigo-700 flex items-center justify-center font-bold text-white text-[10px]">
                   MoES
                 </div>
                 <div>
-                  <div className="font-bold text-white">National Centre for Polar and Ocean Research</div>
-                  <div className="text-[10px] text-slate-400">Government Organization • Public</div>
+                  <div className="font-bold text-[#143b5e]">National Centre for Polar and Ocean Research</div>
+                  <div className="text-[10px] text-slate-500">Government Organization • Public</div>
                 </div>
               </div>
-              <p className="text-slate-200 leading-relaxed line-clamp-5">
+              <p className="text-slate-700 leading-relaxed line-clamp-5">
                 {selectedDraft?.body_md?.slice(0, 300) ||
                   "Scientific outreach update from India's polar campaign. Discover open technical monographs directly through the National Polar Science Knowledge Portal."}
               </p>
