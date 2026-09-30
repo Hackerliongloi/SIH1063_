@@ -20,6 +20,12 @@ A FastAPI modular monolith for the Polar science archive, editorial workflow, an
 
 Database schema upgrades run through Alembic at API startup. Persistent volumes hold Postgres, Redis, and RustFS data. Keep backups of those volumes in any real deployment.
 
+## Deploy the API to Render
+
+Create a new Blueprint in Render from this repository and select `render.yaml`. It provisions a Docker web service and PostgreSQL database. During setup, provide `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `CORS_ORIGINS`; Render generates `SECRET_KEY` automatically. The API will be available at the service URL, with interactive docs at `/docs` and health status at `/health`.
+
+The Blueprint intentionally uses the free web and database plans. The free database is temporary and has limited storage; Render's free web service may sleep. Redis and the background worker are not included, so file ingestion runs synchronously. Without an S3-compatible storage service configured, uploaded files use the local filesystem and can be lost when the service restarts. Configure `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, and `STORAGE_BUCKET` with an S3-compatible provider for persistent uploads. Add a paid Render Key Value service and worker later if background ingestion is needed.
+
 ## Run API without containers
 
 Use Python 3.12+, create a virtual environment, install `requirements.txt`, then configure `DATABASE_URL=sqlite:///./polar.db`, `REDIS_URL`, storage settings, and `API_PROXY_TARGET=http://localhost:8000`. Run the API from `backend/` with `uvicorn app.main:app --reload --app-dir ..`, then start the frontend in another terminal with `npm run dev`. Redis and RustFS are optional for development: uploads fall back to local `backend/media` storage and ingestion runs inline when RQ is unavailable.

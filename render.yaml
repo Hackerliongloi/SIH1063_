@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: polarapi
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: polarapi-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+
+databases:
+  - name: polarapi-db
+    databaseName: polar
+    user: polar
+    plan: free
+    region: oregon
+    postgresMajorVersion: "16"
