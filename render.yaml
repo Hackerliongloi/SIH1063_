@@ -22,6 +22,24 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      - key: ACCESS_TOKEN_MINUTES
+        value: "30"
+      - key: REFRESH_TOKEN_DAYS
+        value: "14"
+      - key: MAX_UPLOAD_MB
+        value: "200"
+      - key: STORAGE_BUCKET
+        value: polar-assets
+      - key: STORAGE_REGION
+        value: us-east-1
+      - key: LLM_PROVIDER
+        value: fake
+      - key: MODEL_NAME
+        value: local-fake
+      - key: MODEL_BASE_URL
+        value: ""
+      - key: MODEL_PATH
+        value: ""
 
 databases:
   - name: polarapi-db
