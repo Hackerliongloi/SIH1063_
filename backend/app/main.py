@@ -13,7 +13,7 @@ from .core.security import hash_password, verify_password, token_for, current_us
 from .models import *
 from .services import store_file, enqueue_ingestion, extract_text
 from .embeddings import embed, cosine
-from .providers import generate_locally
+from .providers import generate_locally, generate_openrouter
 from pgvector.sqlalchemy import Vector
 from .core.rate_limit import enforce_rate_limit
 
@@ -322,10 +322,15 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
     if not isinstance(formats,list) or not formats or any(kind not in allowed_formats for kind in formats):
         raise HTTPException(422,{"detail":"formats must be a non-empty list of supported outreach formats","supported":sorted(allowed_formats)})
     formats=list(dict.fromkeys(formats))
-    ids=payload.get("asset_ids") or []
+    raw_ids=payload.get("asset_ids") or []
+    if not isinstance(raw_ids,list):raise HTTPException(422,"asset_ids must be a list of asset IDs")
+    try:
+        ids=[int(asset_id) for asset_id in raw_ids]
+        expedition_id=int(payload["expedition_id"]) if payload.get("expedition_id") not in (None,"") else None
+    except (TypeError,ValueError):raise HTTPException(422,"asset_ids and expedition_id must contain valid integer IDs")
     stmt=select(Chunk,Asset).join(Asset,Chunk.asset_id==Asset.id).where(Asset.status=="ready")
     if ids:stmt=stmt.where(Asset.id.in_(ids))
-    elif payload.get("expedition_id"):stmt=stmt.where(Asset.expedition_id==payload["expedition_id"])
+    elif expedition_id:stmt=stmt.where(Asset.expedition_id==expedition_id)
     elif payload.get("theme"):stmt=stmt.where(or_(Asset.title.ilike(f"%{payload['theme']}%"),Chunk.text.ilike(f"%{payload['theme']}%")))
     else:raise HTTPException(422,"Provide asset_ids, expedition_id, or theme")
     rows=db.execute(stmt.limit(12)).all()
@@ -334,6 +339,8 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
     for i,(c,a) in enumerate(rows,1):
         excerpt=c.text[:700];snippets.append(f"[{i}] {excerpt}");citations.append((c,a))
     citation_rows=[{"chunk_id":c.id,"asset_id":a.id,"asset_title":a.title,"text":c.text} for c,a in citations]
+    if settings.llm_provider=="openrouter" and not settings.model_api_key:
+        raise HTTPException(503,"OpenRouter is selected but MODEL_API_KEY is not configured")
     output=[];linked_content={}
     try:
         for kind in formats:
@@ -351,7 +358,10 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
             if settings.llm_provider=="ollama":
                 generated=generate_locally(settings.model_name,settings.model_base_url,citation_rows,kind,payload.get("tone","general_public"),payload.get("theme",""))
                 title=generated["title"];body=generated["body_md"];selected_citations=generated["citations"]
-            d=Draft(kind=kind,title=title,body_md=body,tone=payload.get("tone","general_public"),status="draft",ai_assisted=True,created_by=u.id,expedition_id=payload.get("expedition_id"));db.add(d);db.flush()
+            elif settings.llm_provider=="openrouter":
+                generated=generate_openrouter(settings.model_name,settings.model_api_key,citation_rows,kind,payload.get("tone","general_public"),payload.get("theme",""))
+                title=generated["title"];body=generated["body_md"];selected_citations=generated["citations"]
+            d=Draft(kind=kind,title=title,body_md=body,tone=payload.get("tone","general_public"),status="draft",ai_assisted=True,created_by=u.id,expedition_id=expedition_id);db.add(d);db.flush()
             for item in selected_citations:
                 chunk=db.get(Chunk,item["chunk_id"]);span=item.get("span_text",item.get("text",""))
                 supported=bool(chunk and span and span in chunk.text)
@@ -360,7 +370,7 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
             if kind in {"story","post","reel"}:
                 from .modules.feed import FeedCitation, FeedItem, OutreachStory, StoryCitation, StorySlide
                 if kind=="story":
-                    story=OutreachStory(title=title,summary=body[:500],status="draft",expedition_id=payload.get("expedition_id"),ai_assisted=True,source_draft_id=d.id,created_by=u.id)
+                    story=OutreachStory(title=title,summary=body[:500],status="draft",expedition_id=expedition_id,ai_assisted=True,source_draft_id=d.id,created_by=u.id)
                     db.add(story);db.flush()
                     slide=StorySlide(story_id=story.id,position=0,kind="text",title=title,body=body[:3000],duration_seconds=7)
                     db.add(slide);db.flush()
@@ -379,8 +389,8 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
         db.commit()
     except Exception as exc:
         db.rollback()
-        if settings.llm_provider=="ollama":raise HTTPException(502,f"Local Ollama generation failed citation validation: {str(exc)[:300]}")
         if isinstance(exc,HTTPException):raise
+        if settings.llm_provider in {"ollama","openrouter"}:raise HTTPException(502,f"{settings.llm_provider.title()} generation failed: {str(exc)[:300]}")
         raise HTTPException(422,f"Draft generation failed source validation: {str(exc)[:300]}")
     for draft in output:db.refresh(draft)
     return [{**serialize_draft(d),"linked_content":linked_content.get(d.id),"provider":settings.llm_provider,"notice":"Draft uses retrieved repository sources; exact citation spans are validated. Editorial approval is required before publication.","citations_count":db.scalar(select(func.count(DraftCitation.id)).where(DraftCitation.draft_id==d.id)) or 0,"citations":[{"claim_text":c.claim_text,"chunk_id":c.chunk_id,"asset_id":c.asset_id,"span_text":c.span_text,"supported":c.supported} for c in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==d.id))]} for d in output]
