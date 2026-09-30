@@ -35,17 +35,23 @@ async function forward(request: NextRequest, path: string[], method: string) {
     return response;
   }
 
-  const send = async (url: string, token?: string, body?: string) => {
+  const send = async (url: string, token?: string, body?: ArrayBuffer) => {
     const headers = new Headers();
     const contentType = request.headers.get("content-type");
     if (contentType) headers.set("content-type", contentType);
     const accept = request.headers.get("accept");
     if (accept) headers.set("accept", accept);
+    const range = request.headers.get("range");
+    if (range) headers.set("range", range);
+    const ifRange = request.headers.get("if-range");
+    if (ifRange) headers.set("if-range", ifRange);
     if (token) headers.set("authorization", `Bearer ${token}`);
     return fetch(url, { method, headers, body, cache: "no-store", redirect: "manual" });
   };
 
-  const body = method === "GET" || method === "HEAD" ? undefined : await request.text();
+  // Preserve multipart video uploads byte-for-byte while keeping request bodies replayable
+  // if access-token refresh is needed.
+  const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
   let accessToken = request.cookies.get(ACCESS_COOKIE)?.value;
   let upstream = await send(isSession ? backendUrl(["auth", "me"], "") : requestUrl, accessToken, body);
   let rotated: { access_token: string; refresh_token?: string; expires_in?: number } | undefined;
@@ -77,11 +83,12 @@ async function forward(request: NextRequest, path: string[], method: string) {
     return response;
   }
 
-  const responseBody = await upstream.arrayBuffer();
-  const response = new NextResponse(responseBody.byteLength ? responseBody : null, { status: upstream.status });
-  const responseContentType = upstream.headers.get("content-type");
-  if (responseContentType) response.headers.set("content-type", responseContentType);
-  response.headers.set("cache-control", "no-store");
+  const response = new NextResponse(upstream.body, { status: upstream.status });
+  for (const header of ["content-type", "content-length", "content-range", "accept-ranges", "content-disposition", "etag", "last-modified"]) {
+    const value = upstream.headers.get(header);
+    if (value) response.headers.set(header, value);
+  }
+  response.headers.set("cache-control", upstream.headers.get("cache-control") || "no-store");
   if (rotated?.access_token) setTokens(response, rotated.access_token, rotated.refresh_token, rotated.expires_in);
   if (upstream.status === 401 && !request.cookies.get(REFRESH_COOKIE)?.value) clearTokens(response);
   return response;
