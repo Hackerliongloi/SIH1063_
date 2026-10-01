@@ -243,7 +243,7 @@ def discovery_search(q:str="",content_type:str|None=None,region:str|None=None,ex
     def score_record(title:str,body:str,source_chunks:list[Chunk],published_at:datetime|None,kind:str,record:dict):
         text=f"{title} {body}".lower()
         keyword=sum(1 for term in terms if term in text)/max(len(terms),1)
-        semantic=max((cosine(vector,chunk.embedding or []) for chunk in source_chunks),default=0.0) if vector else 0.0
+        semantic=max((cosine(vector,chunk.embedding) for chunk in source_chunks),default=0.0) if vector else 0.0
         instant=published_at or now()
         if instant.tzinfo is None:instant=instant.replace(tzinfo=timezone.utc)
         age_days=max((now()-instant).total_seconds()/86400,0);recency=0.5**(age_days/365)

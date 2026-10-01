@@ -16,6 +16,9 @@ def now(): return datetime.now(timezone.utc)
 class User(Base):
     __tablename__="users"
     id: Mapped[int]=mapped_column(primary_key=True); email: Mapped[str]=mapped_column(String(320), unique=True, index=True); password_hash: Mapped[str]=mapped_column(String(255)); role: Mapped[str]=mapped_column(String(20), default="viewer"); is_active: Mapped[bool]=mapped_column(Boolean, default=True); created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True), default=now)
+class ActivationToken(Base):
+    __tablename__="activation_tokens"
+    id: Mapped[int]=mapped_column(primary_key=True); user_id: Mapped[int]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True); token_hash: Mapped[str]=mapped_column(String(255)); expires_at: Mapped[datetime]=mapped_column(DateTime(timezone=True)); created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
 class Expedition(Base):
     __tablename__="expeditions"
     id: Mapped[int]=mapped_column(primary_key=True); name: Mapped[str]=mapped_column(String(240), index=True); year: Mapped[int|None]=mapped_column(Integer, nullable=True); region: Mapped[str|None]=mapped_column(String(120), nullable=True); start_date:Mapped[date|None]=mapped_column(Date,nullable=True);end_date:Mapped[date|None]=mapped_column(Date,nullable=True);stations: Mapped[list]=mapped_column(JSON, default=list); description: Mapped[str]=mapped_column(Text, default="")

@@ -24,14 +24,15 @@ export default function LoginPage() {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.detail || "Sign in failed. Check your email and password.");
       const role = result.user?.role;
-      if (!["admin", "editor", "reviewer", "viewer"].includes(role)) throw new Error("This account does not have an assigned portal role.");
+      if (!["admin", "editor", "reviewer", "viewer", "submitter"].includes(role)) throw new Error("This account does not have an assigned portal role.");
       window.dispatchEvent(new Event("polar-auth-changed"));
       const next = new URLSearchParams(window.location.search).get("next");
       const roleCanOpenNext = role === "admin"
         || (role === "editor" && ["/admin/content", "/admin/editorial", "/admin/generate"].some((path) => next?.startsWith(path)))
-        || (role === "reviewer" && next?.startsWith("/admin/editorial"));
-      const safeNext = next?.startsWith("/admin") && roleCanOpenNext;
-      router.replace(safeNext ? next! : role === "reviewer" ? "/admin/editorial" : role === "viewer" ? "/" : "/admin/content");
+        || (role === "reviewer" && next?.startsWith("/admin/editorial"))
+        || (role === "submitter" && next?.startsWith("/submitter"));
+      const safeNext = (next?.startsWith("/admin") || next?.startsWith("/submitter")) && roleCanOpenNext;
+      router.replace(safeNext ? next! : role === "reviewer" ? "/admin/editorial" : role === "submitter" ? "/submitter/datasets" : role === "viewer" ? "/" : "/admin/content");
       router.refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to sign in. Please try again.");
@@ -52,7 +53,10 @@ export default function LoginPage() {
         {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
         <button type="submit" disabled={submitting} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#12679a] px-4 py-3 text-sm font-bold text-white hover:bg-[#0d527d] disabled:cursor-wait disabled:opacity-60">{submitting && <LoaderCircle className="h-4 w-4 animate-spin" />}{submitting ? "Signing in…" : "Sign in"}</button>
       </form>
-      <Link href="/" className="mt-5 inline-block text-sm font-semibold text-[#12679a] hover:underline">Return to public site</Link>
+      <div className="mt-5 flex items-center justify-between">
+        <Link href="/" className="inline-block text-sm font-semibold text-[#12679a] hover:underline">Return to public site</Link>
+        <Link href="/register" className="inline-block text-sm font-semibold text-[#12679a] hover:underline">Register as Submitter</Link>
+      </div>
     </div>
   </section>;
 }

@@ -12,7 +12,7 @@ import SectionPage from "@/components/SectionPage";
 import { api } from "@/lib/api";
 
 type SearchHit = {
-  asset_id: number | string;
+  id: number | string;
   title: string;
   type?: string;
   region?: string;
@@ -20,18 +20,20 @@ type SearchHit = {
   score?: number;
   score_breakdown?: { w_kw_part?: number; w_sem_part?: number; w_rec_part?: number };
   thumb_key?: string | null;
+  file_key?: string | null;
   expedition?: string | null;
   snippet?: string | null;
   page?: number | string | null;
 };
 
 type ImageHit = {
-  asset_id: number | string;
+  id: number | string;
   title: string;
   region?: string;
   year?: number | string;
   similarity_score?: number;
   thumb_key?: string | null;
+  file_key?: string | null;
   description?: string | null;
 };
 
@@ -59,14 +61,27 @@ function ExploreContent() {
   const [selectedType, setSelectedType] = useState(searchParams.get("type") || "");
   const [selectedRegion, setSelectedRegion] = useState(searchParams.get("region") || "");
   const [selectedSort, setSelectedSort] = useState(searchParams.get("sort") || "relevance");
+  const [selectedExpedition, setSelectedExpedition] = useState(searchParams.get("expedition") || "");
+  const [yearFrom, setYearFrom] = useState(searchParams.get("year_from") || "");
+  const [yearTo, setYearTo] = useState(searchParams.get("year_to") || "");
+  
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [results, setResults] = useState<SearchHit[]>([]);
   const [imageResults, setImageResults] = useState<ImageHit[]>([]);
+  const [expeditions, setExpeditions] = useState<{id:string|number, name:string}[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [parsedYears, setParsedYears] = useState<{ from?: number; to?: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchError, setSearchError] = useState(false);
   const [activeScoreBreakdown, setActiveScoreBreakdown] = useState<SearchHit | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.getExpeditions().then((res) => {
+      if (active) setExpeditions(Array.isArray(res) ? res : []);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -79,6 +94,9 @@ function ExploreContent() {
             q: query,
             type: selectedType || undefined,
             region: selectedRegion || undefined,
+            expedition: selectedExpedition || undefined,
+            year_from: yearFrom ? parseInt(yearFrom) : undefined,
+            year_to: yearTo ? parseInt(yearTo) : undefined,
             sort: selectedSort,
           });
           if (!active) return;
@@ -86,7 +104,7 @@ function ExploreContent() {
           setTotalCount(Number(response.total) || 0);
           setParsedYears(response.parsed_year_range || null);
         } else {
-          const response = await api.searchImages(query || "polar research");
+          const response = await api.searchImages(query);
           if (!active) return;
           setImageResults(Array.isArray(response.results) ? response.results : []);
           setTotalCount(Number(response.total) || 0);
@@ -100,7 +118,7 @@ function ExploreContent() {
     }
     void executeSearch();
     return () => { active = false; };
-  }, [query, selectedType, selectedRegion, selectedSort, activeTab]);
+  }, [query, selectedType, selectedRegion, selectedExpedition, yearFrom, yearTo, selectedSort, activeTab]);
 
   const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -108,6 +126,9 @@ function ExploreContent() {
     if (query.trim()) params.set("q", query.trim());
     if (selectedType) params.set("type", selectedType);
     if (selectedRegion) params.set("region", selectedRegion);
+    if (selectedExpedition) params.set("expedition", selectedExpedition);
+    if (yearFrom) params.set("year_from", yearFrom);
+    if (yearTo) params.set("year_to", yearTo);
     if (selectedSort !== "relevance") params.set("sort", selectedSort);
     router.replace(params.size ? `/explore?${params.toString()}` : "/explore");
   };
@@ -115,6 +136,9 @@ function ExploreContent() {
   const clearFilters = () => {
     setSelectedType("");
     setSelectedRegion("");
+    setSelectedExpedition("");
+    setYearFrom("");
+    setYearTo("");
     setSelectedSort("relevance");
     setQuery("");
     setParsedYears(null);
@@ -133,6 +157,21 @@ function ExploreContent() {
       {item.label}{selectedRegion === item.value && <Check className="h-4 w-4" />}
     </button>
   ));
+
+  const expeditionOptions = () => (
+    <select value={selectedExpedition} onChange={(e) => setSelectedExpedition(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:border-sky-600 focus:outline-none">
+      <option value="">All Voyages</option>
+      {expeditions.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+    </select>
+  );
+
+  const yearOptions = () => (
+    <div className="flex items-center gap-2">
+      <input type="number" placeholder="From" value={yearFrom} onChange={e => setYearFrom(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:border-sky-600 focus:outline-none" />
+      <span className="text-slate-400">-</span>
+      <input type="number" placeholder="To" value={yearTo} onChange={e => setYearTo(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:border-sky-600 focus:outline-none" />
+    </div>
+  );
 
   return <SectionPage section="Knowledge repository" title="Search research" intro="Find reports, datasets, publications, photographs and other resources from India's polar and ocean research programmes.">
     <div className="space-y-5">
@@ -161,9 +200,12 @@ function ExploreContent() {
 
       <div className="grid gap-5 xl:grid-cols-4 xl:items-start">
         <aside className="hidden space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm xl:block" aria-label="Search filters">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3"><h2 className="flex items-center gap-2 text-sm font-bold text-[#143b5e]"><SlidersHorizontal className="h-4 w-4 text-[#3282a8]" />Filters</h2>{(selectedType || selectedRegion || query) && <button type="button" onClick={clearFilters} className="text-xs font-semibold text-[#12679a] hover:underline">Clear all</button>}</div>
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3"><h2 className="flex items-center gap-2 text-sm font-bold text-[#143b5e]"><SlidersHorizontal className="h-4 w-4 text-[#3282a8]" />Filters</h2>{(selectedType || selectedRegion || query || selectedExpedition || yearFrom || yearTo) && <button type="button" onClick={clearFilters} className="text-xs font-semibold text-[#12679a] hover:underline">Clear all</button>}</div>
           <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Resource type</legend><div className="space-y-1">{typeOptions()}</div></fieldset>
           <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Region</legend><div className="space-y-1">{regionOptions()}</div></fieldset>
+          <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Scientific Voyage</legend><div>{expeditionOptions()}</div></fieldset>
+          <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Observation Dates</legend><div>{yearOptions()}</div></fieldset>
+          
           <div className="border-t border-slate-100 pt-4"><label htmlFor="sort-results" className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Sort results</label><select id="sort-results" value={selectedSort} onChange={(event) => setSelectedSort(event.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:border-sky-600 focus:outline-none"><option value="relevance">Most relevant</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></div>
           <div className="rounded-lg bg-sky-50 p-3 text-xs leading-5 text-slate-600"><p className="font-semibold text-[#245b7c]">How search works</p><p className="mt-1">Results combine keyword matching, semantic relevance and record dates.</p></div>
         </aside>
@@ -177,19 +219,19 @@ function ExploreContent() {
           {searchError ? <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">Search is temporarily unavailable. Please try again.</div>
             : loading ? <div className="grid min-h-56 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500"><div className="flex items-center gap-3 text-sm"><LoaderCircle className="h-5 w-5 animate-spin text-[#277ba5]" />Searching the repository</div></div>
             : activeTab === "hybrid" ? results.length === 0 ? <div className="rounded-xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm"><Database className="mx-auto h-8 w-8 text-slate-400" /><h2 className="mt-3 text-lg font-bold text-[#143b5e]">No matching records</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-600">Try different search terms or broaden the selected filters.</p><button type="button" onClick={clearFilters} className="mt-5 rounded-lg bg-[#12679a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0d527d]">Clear filters</button></div>
-              : <div className="space-y-4">{results.map((hit) => <article key={hit.asset_id} className="group flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-300 hover:shadow-md sm:flex-row sm:p-5">
+              : <div className="space-y-4">{results.map((hit) => <article key={hit.id} className="group flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-300 hover:shadow-md sm:flex-row sm:p-5">
                 {hit.thumb_key && <div className="relative h-44 shrink-0 overflow-hidden rounded-lg bg-slate-100 sm:h-32 sm:w-40"><img src={hit.thumb_key} alt={hit.title} className="h-full w-full object-cover transition-transform group-hover:scale-105" /><span className="absolute bottom-2 left-2 rounded bg-white/95 px-2 py-1 text-[10px] font-bold uppercase text-[#245b7c]">{hit.type || "Resource"}</span></div>}
                 <div className="flex min-w-0 flex-1 flex-col justify-between gap-3">
                   <div><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><span className="inline-flex items-center gap-1 text-xs text-slate-500"><MapPin className="h-3.5 w-3.5" />{hit.region || "Polar regions"}{hit.year ? ` · ${hit.year}` : ""}</span><button type="button" onClick={() => setActiveScoreBreakdown(hit)} className="inline-flex min-h-8 items-center gap-1.5 rounded-full bg-sky-50 px-2.5 text-xs font-semibold text-[#245b7c] hover:bg-sky-100" aria-label={`View relevance details for ${hit.title}`}><Sparkles className="h-3.5 w-3.5" />Relevance {typeof hit.score === "number" ? hit.score.toFixed(2) : "details"}<Info className="h-3 w-3" /></button></div>
-                    <Link href={`/assets/${hit.asset_id}`} className="text-base font-bold leading-snug text-[#143b5e] hover:text-[#12679a]">{hit.title}</Link>
+                    <Link href={`/assets/${hit.id}`} className="text-base font-bold leading-snug text-[#143b5e] hover:text-[#12679a]">{hit.title}</Link>
                     {hit.expedition && <p className="mt-1 text-xs text-slate-500">{hit.expedition}</p>}
                     {hit.snippet && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">{hit.snippet}</p>}
                   </div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500"><span>{hit.page ? `Matched on page ${hit.page}` : "Research archive record"}</span><Link href={`/assets/${hit.asset_id}`} className="inline-flex min-h-8 items-center gap-1 font-semibold text-[#12679a] hover:underline">View record <ArrowRight className="h-3.5 w-3.5" /></Link></div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500"><span>{hit.page ? `Matched on page ${hit.page}` : "Research archive record"}</span><Link href={`/assets/${hit.id}`} className="inline-flex min-h-8 items-center gap-1 font-semibold text-[#12679a] hover:underline">View record <ArrowRight className="h-3.5 w-3.5" /></Link></div>
                 </div>
               </article>)}</div>
               : imageResults.length === 0 ? <div className="rounded-xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm"><ImageIcon className="mx-auto h-8 w-8 text-slate-400" /><h2 className="mt-3 text-lg font-bold text-[#143b5e]">No matching images</h2><p className="mt-2 text-sm text-slate-600">Try a different description or a broader search.</p></div>
-                : <div className="grid gap-4 sm:grid-cols-2">{imageResults.map((photo) => <article key={photo.asset_id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-[4/3] bg-slate-100">{photo.thumb_key ? <img src={photo.thumb_key} alt={photo.title} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-400"><ImageIcon className="h-8 w-8" /></div>}<span className="absolute right-2 top-2 rounded-full bg-white/95 px-2.5 py-1 text-xs font-semibold text-teal-800">Similarity {typeof photo.similarity_score === "number" ? photo.similarity_score.toFixed(2) : "—"}</span></div><div className="p-4"><p className="text-xs text-slate-500">{photo.region || "Polar regions"}{photo.year ? ` · ${photo.year}` : ""}</p><h2 className="mt-1 font-bold text-[#143b5e]">{photo.title}</h2>{photo.description && <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{photo.description}</p>}<Link href={`/assets/${photo.asset_id}`} className="mt-4 inline-flex min-h-9 items-center gap-1 text-sm font-semibold text-[#12679a] hover:underline">View image record <ArrowRight className="h-4 w-4" /></Link></div></article>)}</div>}
+                : <div className="grid gap-4 sm:grid-cols-2">{imageResults.map((photo) => <article key={photo.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-[4/3] bg-slate-100">{photo.thumb_key ? <img src={photo.thumb_key} alt={photo.title} className="h-full w-full object-cover" /> : photo.file_key ? <img src={`/api/storage/${photo.file_key}`} alt={photo.title} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-400"><ImageIcon className="h-8 w-8" /></div>}<span className="absolute right-2 top-2 rounded-full bg-white/95 px-2.5 py-1 text-xs font-semibold text-teal-800">Similarity {typeof photo.similarity_score === "number" ? photo.similarity_score.toFixed(2) : "—"}</span></div><div className="p-4"><p className="text-xs text-slate-500">{photo.region || "Polar regions"}{photo.year ? ` · ${photo.year}` : ""}</p><h2 className="mt-1 font-bold text-[#143b5e]">{photo.title}</h2>{photo.description && <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{photo.description}</p>}<Link href={`/assets/${photo.id}`} className="mt-4 inline-flex min-h-9 items-center gap-1 text-sm font-semibold text-[#12679a] hover:underline">View image record <ArrowRight className="h-4 w-4" /></Link></div></article>)}</div>}
         </main>
       </div>
     </div>
@@ -199,6 +241,8 @@ function ExploreContent() {
         <div className="flex items-center justify-between border-b border-slate-100 pb-3"><h2 id="filter-dialog-title" className="text-base font-bold text-[#143b5e]">Filter research</h2><button type="button" onClick={() => setMobileFilterOpen(false)} aria-label="Close filters" className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button></div>
         <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Resource type</legend><div className="grid grid-cols-2 gap-2">{typeOptions(true)}</div></fieldset>
         <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Region</legend><div className="grid grid-cols-2 gap-2">{regionOptions(true)}</div></fieldset>
+        <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Scientific Voyage</legend><div>{expeditionOptions()}</div></fieldset>
+        <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Observation Dates</legend><div>{yearOptions()}</div></fieldset>
         <button type="button" onClick={() => setMobileFilterOpen(false)} className="min-h-11 w-full rounded-lg bg-[#12679a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0d527d]">Show {totalCount} results</button>
       </section>
     </div>}
