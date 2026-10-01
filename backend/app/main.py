@@ -70,12 +70,21 @@ class UserIn(BaseModel):
     @classmethod
     def validate_email(cls, value: str) -> str:
         return normalize_portal_email(value)
+class RegisterIn(BaseModel):
+    email: str
+    password: str=Field(min_length=12)
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return normalize_portal_email(value)
+class ActivateIn(BaseModel):
+    token: str
 class ExpeditionIn(BaseModel): name:str; year:int|None=None; region:str|None=None; start_date:date|None=None; end_date:date|None=None; stations:list[str]=Field(default_factory=list); description:str=""
 class AssetIn(BaseModel): type:str; title:str; description:str=""; expedition_id:int|None=None; region:str|None=None; station:str|None=None; year:int|None=None; external_url:str|None=None; tags:list[str]=Field(default_factory=list); metadata:dict=Field(default_factory=dict)
 class DraftIn(BaseModel): kind:str; title:str; body_md:str=""; tone:str="general_public"; expedition_id:int|None=None; ai_assisted:bool=False
 class TransitionIn(BaseModel): action:str; comment:str=""; scheduled_at:str|None=None
 class EditorialCommentIn(BaseModel): comment:str=Field(min_length=1,max_length=5000)
-ASSET_TYPES={"report","dataset","publication","photo","video","activity"}; ROLES={"admin","editor","reviewer","viewer"}
+ASSET_TYPES={"report","dataset","publication","photo","video","activity"}; ROLES={"admin","editor","reviewer","viewer","submitter"}
 def serialize_asset(a): return {"id":a.id,"type":a.type,"title":a.title,"description":a.description,"expedition_id":a.expedition_id,"expedition":a.expedition.name if a.expedition else None,"region":a.region,"station":a.station,"year":a.year,"file_key":a.file_key,"thumb_key":a.thumb_key,"external_url":a.external_url,"status":a.status,"error":a.error,"version":a.version,"metadata":a.metadata_json,"created_at":a.created_at.isoformat() if a.created_at else None}
 def serialize_draft(d): return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at}
 def serialize_public_draft(d,db):
@@ -113,6 +122,36 @@ def refresh(payload:dict,db:Session=Depends(get_db)):
 def me(u=Depends(current_user)):
     if not u: raise HTTPException(401,"Authentication required")
     return {"id":u.id,"email":u.email,"role":u.role}
+@app.post("/api/auth/register",status_code=201)
+def register(data:RegisterIn,request:Request,db:Session=Depends(get_db)):
+    enforce_rate_limit(request,"register",5,300)
+    import secrets, hashlib
+    from datetime import timedelta, timezone
+    if db.scalar(select(User).where(User.email==data.email.lower())): raise HTTPException(409,"Email already registered")
+    u=User(email=data.email.lower(),password_hash=hash_password(data.password),role="submitter",is_active=False)
+    db.add(u);db.flush()
+    raw_token=secrets.token_urlsafe(32)
+    token_hash=hashlib.sha256(raw_token.encode()).hexdigest()
+    expires_at=datetime.now(timezone.utc)+timedelta(days=1)
+    db.add(ActivationToken(user_id=u.id,token_hash=token_hash,expires_at=expires_at))
+    db.commit()
+    logging.info('{"event":"activation_email","email":"%s","link":"http://localhost:3000/activate?token=%s"}',u.email,raw_token)
+    return {"message":"Check your email for activation link"}
+
+@app.post("/api/auth/activate")
+def activate(data:ActivateIn,db:Session=Depends(get_db)):
+    import hashlib
+    from datetime import timezone
+    token_hash=hashlib.sha256(data.token.encode()).hexdigest()
+    t=db.scalar(select(ActivationToken).where(ActivationToken.token_hash==token_hash))
+    if not t: raise HTTPException(400,"Invalid or expired token")
+    if t.expires_at<datetime.now(timezone.utc):
+        db.delete(t);db.commit();raise HTTPException(400,"Token expired")
+    u=db.get(User,t.user_id)
+    if u: u.is_active=True
+    db.delete(t);db.commit()
+    return {"message":"Account activated successfully"}
+
 @app.post("/api/users",status_code=201)
 def create_user(data:UserIn,db:Session=Depends(get_db),u=Depends(require_roles("admin"))):
     if data.role not in ROLES: raise HTTPException(422,"Invalid role")
@@ -455,3 +494,158 @@ def worker_tick(u=Depends(require_roles("admin"))):return {"status":"worker runs
 
 from .modules.feed import router as feed_router
 app.include_router(feed_router,prefix="/api")
+
+
+# Submitter Endpoints
+@app.get("/api/submitter/datasets")
+def get_submitter_datasets(db:Session=Depends(get_db),u=Depends(require_roles("submitter", "admin", "editor"))):
+    return [serialize_asset(a) for a in db.scalars(select(Asset).where(Asset.created_by==u.id).order_by(Asset.updated_at.desc()))]
+
+@app.post("/api/datasets", status_code=201)
+def create_dataset_draft(data:AssetIn,db:Session=Depends(get_db),u=Depends(require_roles("submitter", "admin", "editor"))):
+    if data.type not in ASSET_TYPES: raise HTTPException(422,"Unsupported asset type")
+    a=Asset(**data.model_dump(exclude={"tags","metadata"}),metadata_json=data.metadata,created_by=u.id,status="draft")
+    db.add(a);db.flush()
+    for name in set(data.tags):
+        normalized=name.strip()
+        if normalized:
+            tag=db.scalar(select(Tag).where(func.lower(Tag.name)==normalized.lower()))
+            if not tag:tag=Tag(name=normalized,kind="theme");db.add(tag);db.flush()
+            db.add(AssetTag(asset_id=a.id,tag_id=tag.id))
+    db.add(AssetVersion(asset_id=a.id,version=1,snapshot_json=data.model_dump(mode="json")))
+    db.commit();db.refresh(a)
+    return serialize_asset(a)
+
+@app.post("/api/datasets/{id}/upload", status_code=202)
+async def upload_dataset_file(id:int,file:UploadFile=File(...),db:Session=Depends(get_db),u=Depends(require_roles("submitter", "admin", "editor"))):
+    a = db.get(Asset, id)
+    if not a: raise HTTPException(404, "Asset not found")
+    if a.created_by != u.id and u.role not in {"admin", "editor"}: raise HTTPException(403, "Not authorized")
+    if a.status not in {"draft", "rejected", "failed"}: raise HTTPException(400, "Can only upload to draft, rejected or failed datasets")
+    
+    suffix=(file.filename or "").lower().rsplit(".",1)[-1] if "." in (file.filename or "") else ""
+    allowed={"pdf","docx","csv","nc","nc4","jpg","jpeg","png","webp","tif","tiff","mp4","txt", "xml"}
+    if suffix not in allowed: raise HTTPException(415,"Unsupported file extension")
+    data=await file.read(settings.max_upload_mb*1024*1024+1)
+    if not data or len(data)>settings.max_upload_mb*1024*1024: raise HTTPException(413,"File empty or exceeds upload limit")
+    key=store_file(data,suffix,file.content_type or "application/octet-stream")
+    a.file_key=key
+    a.status="processing"
+    a.metadata_json = dict(a.metadata_json or {})
+    a.metadata_json.update({"filename":file.filename,"content_type":file.content_type,"size":len(data)})
+    db.commit()
+    queued=enqueue_ingestion(a.id,key,suffix)
+    if not queued:
+        try:
+            text=extract_text(data,suffix)
+            if text:
+                for i in range(0,len(text),2500):
+                    chunk_text=text[i:i+3000]
+                    db.add(Chunk(asset_id=a.id,idx=i//2500,text=chunk_text,embedding=embed(chunk_text)))
+            # When upload finishes inline, state returns to draft for submitters to review before submitting
+            a.status="draft";db.commit()
+        except Exception as e: a.status="failed";a.error=str(e)[:1000];db.commit()
+    return {"asset":serialize_asset(a),"job_queued":queued}
+
+@app.post("/api/datasets/{id}/transition")
+def transition_dataset(id:int,data:TransitionIn,db:Session=Depends(get_db),u=Depends(require_roles("submitter","admin","editor","reviewer"))):
+    a = db.get(Asset, id)
+    if not a: raise HTTPException(404, "Asset not found")
+    
+    rules={
+        "submit": ({"draft", "rejected"}, {"submitter", "admin", "editor"}, "in_review"),
+        "approve": ({"in_review"}, {"admin", "reviewer"}, "ready"),
+        "request_changes": ({"in_review"}, {"admin", "reviewer"}, "rejected"),
+        "archive": ({"ready", "draft", "rejected", "in_review"}, {"admin", "editor"}, "archived")
+    }
+    rule = rules.get(data.action)
+    if not rule or a.status not in rule[0] or u.role not in rule[1]: raise HTTPException(409, "Transition not allowed for this state or role")
+    if data.action == "submit" and a.created_by != u.id and u.role not in {"admin", "editor"}: raise HTTPException(403, "Not authorized to submit")
+    
+    a.status = rule[2]
+    a.updated_at = now()
+    db.commit();db.refresh(a)
+    return serialize_asset(a)
+
+
+@app.get("/api/assets/{id}/export/xml")
+def export_asset_xml(id:int, db:Session=Depends(get_db)):
+    from fastapi.responses import Response
+    a = db.get(Asset, id)
+    if not a or a.status != "ready": raise HTTPException(404, "Asset not found")
+    
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<MD_Metadata xmlns="http://www.isotc211.org/2005/gmd" xmlns:gco="http://www.isotc211.org/2005/gco">
+    <fileIdentifier><gco:CharacterString>{a.id}</gco:CharacterString></fileIdentifier>
+    <language><gco:CharacterString>eng</gco:CharacterString></language>
+    <characterSet><MD_CharacterSetCode codeListValue="utf8"/></characterSet>
+    <hierarchyLevel><MD_ScopeCode codeListValue="dataset"/></hierarchyLevel>
+    <identificationInfo>
+        <MD_DataIdentification>
+            <citation>
+                <CI_Citation>
+                    <title><gco:CharacterString>{a.title}</gco:CharacterString></title>
+                    <date><CI_Date><date><gco:DateTime>{a.created_at.isoformat()}</gco:DateTime></date><dateType><CI_DateTypeCode codeListValue="publication"/></dateType></CI_Date></date>
+                </CI_Citation>
+            </citation>
+            <abstract><gco:CharacterString>{a.description}</gco:CharacterString></abstract>
+            <status><MD_ProgressCode codeListValue="completed"/></status>
+            <descriptiveKeywords>
+                <MD_Keywords>
+                    <keyword><gco:CharacterString>{a.region}</gco:CharacterString></keyword>
+                    <keyword><gco:CharacterString>{a.station}</gco:CharacterString></keyword>
+                    <keyword><gco:CharacterString>{a.year}</gco:CharacterString></keyword>
+                </MD_Keywords>
+            </descriptiveKeywords>
+        </MD_DataIdentification>
+    </identificationInfo>
+</MD_Metadata>"""
+    return Response(content=xml, media_type="application/xml")
+
+@app.get("/api/assets/{id}/export/pdf")
+def export_asset_pdf(id:int, db:Session=Depends(get_db)):
+    from fastapi.responses import Response
+    from fpdf import FPDF
+    
+    a = db.get(Asset, id)
+    if not a or a.status != "ready": raise HTTPException(404, "Asset not found")
+    
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("helvetica", "B", 16)
+    pdf.cell(0, 10, "National Polar Data Center - Dataset Metadata", ln=True, align="C")
+    pdf.ln(10)
+    
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(40, 10, "Title:")
+    pdf.set_font("helvetica", "", 12)
+    pdf.multi_cell(0, 10, a.title or "N/A")
+    
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(40, 10, "Type:")
+    pdf.set_font("helvetica", "", 12)
+    pdf.cell(0, 10, a.type or "N/A", ln=True)
+    
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(40, 10, "Region:")
+    pdf.set_font("helvetica", "", 12)
+    pdf.cell(0, 10, a.region or "N/A", ln=True)
+    
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(40, 10, "Year:")
+    pdf.set_font("helvetica", "", 12)
+    pdf.cell(0, 10, str(a.year) if a.year else "N/A", ln=True)
+    
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(40, 10, "Station:")
+    pdf.set_font("helvetica", "", 12)
+    pdf.cell(0, 10, a.station or "N/A", ln=True)
+    
+    pdf.ln(10)
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(0, 10, "Description:", ln=True)
+    pdf.set_font("helvetica", "", 12)
+    pdf.multi_cell(0, 10, a.description or "N/A")
+    
+    pdf_bytes = pdf.output()
+    return Response(content=pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=dataset_{a.id}.pdf"})

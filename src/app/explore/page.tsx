@@ -59,14 +59,27 @@ function ExploreContent() {
   const [selectedType, setSelectedType] = useState(searchParams.get("type") || "");
   const [selectedRegion, setSelectedRegion] = useState(searchParams.get("region") || "");
   const [selectedSort, setSelectedSort] = useState(searchParams.get("sort") || "relevance");
+  const [selectedExpedition, setSelectedExpedition] = useState(searchParams.get("expedition") || "");
+  const [yearFrom, setYearFrom] = useState(searchParams.get("year_from") || "");
+  const [yearTo, setYearTo] = useState(searchParams.get("year_to") || "");
+  
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [results, setResults] = useState<SearchHit[]>([]);
   const [imageResults, setImageResults] = useState<ImageHit[]>([]);
+  const [expeditions, setExpeditions] = useState<{id:string|number, name:string}[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [parsedYears, setParsedYears] = useState<{ from?: number; to?: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchError, setSearchError] = useState(false);
   const [activeScoreBreakdown, setActiveScoreBreakdown] = useState<SearchHit | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.getExpeditions().then((res) => {
+      if (active) setExpeditions(Array.isArray(res) ? res : []);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -79,6 +92,9 @@ function ExploreContent() {
             q: query,
             type: selectedType || undefined,
             region: selectedRegion || undefined,
+            expedition: selectedExpedition || undefined,
+            year_from: yearFrom ? parseInt(yearFrom) : undefined,
+            year_to: yearTo ? parseInt(yearTo) : undefined,
             sort: selectedSort,
           });
           if (!active) return;
@@ -100,7 +116,7 @@ function ExploreContent() {
     }
     void executeSearch();
     return () => { active = false; };
-  }, [query, selectedType, selectedRegion, selectedSort, activeTab]);
+  }, [query, selectedType, selectedRegion, selectedExpedition, yearFrom, yearTo, selectedSort, activeTab]);
 
   const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -108,6 +124,9 @@ function ExploreContent() {
     if (query.trim()) params.set("q", query.trim());
     if (selectedType) params.set("type", selectedType);
     if (selectedRegion) params.set("region", selectedRegion);
+    if (selectedExpedition) params.set("expedition", selectedExpedition);
+    if (yearFrom) params.set("year_from", yearFrom);
+    if (yearTo) params.set("year_to", yearTo);
     if (selectedSort !== "relevance") params.set("sort", selectedSort);
     router.replace(params.size ? `/explore?${params.toString()}` : "/explore");
   };
@@ -115,6 +134,9 @@ function ExploreContent() {
   const clearFilters = () => {
     setSelectedType("");
     setSelectedRegion("");
+    setSelectedExpedition("");
+    setYearFrom("");
+    setYearTo("");
     setSelectedSort("relevance");
     setQuery("");
     setParsedYears(null);
@@ -133,6 +155,21 @@ function ExploreContent() {
       {item.label}{selectedRegion === item.value && <Check className="h-4 w-4" />}
     </button>
   ));
+
+  const expeditionOptions = () => (
+    <select value={selectedExpedition} onChange={(e) => setSelectedExpedition(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:border-sky-600 focus:outline-none">
+      <option value="">All Voyages</option>
+      {expeditions.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+    </select>
+  );
+
+  const yearOptions = () => (
+    <div className="flex items-center gap-2">
+      <input type="number" placeholder="From" value={yearFrom} onChange={e => setYearFrom(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:border-sky-600 focus:outline-none" />
+      <span className="text-slate-400">-</span>
+      <input type="number" placeholder="To" value={yearTo} onChange={e => setYearTo(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:border-sky-600 focus:outline-none" />
+    </div>
+  );
 
   return <SectionPage section="Knowledge repository" title="Search research" intro="Find reports, datasets, publications, photographs and other resources from India's polar and ocean research programmes.">
     <div className="space-y-5">
@@ -161,9 +198,12 @@ function ExploreContent() {
 
       <div className="grid gap-5 xl:grid-cols-4 xl:items-start">
         <aside className="hidden space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm xl:block" aria-label="Search filters">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3"><h2 className="flex items-center gap-2 text-sm font-bold text-[#143b5e]"><SlidersHorizontal className="h-4 w-4 text-[#3282a8]" />Filters</h2>{(selectedType || selectedRegion || query) && <button type="button" onClick={clearFilters} className="text-xs font-semibold text-[#12679a] hover:underline">Clear all</button>}</div>
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3"><h2 className="flex items-center gap-2 text-sm font-bold text-[#143b5e]"><SlidersHorizontal className="h-4 w-4 text-[#3282a8]" />Filters</h2>{(selectedType || selectedRegion || query || selectedExpedition || yearFrom || yearTo) && <button type="button" onClick={clearFilters} className="text-xs font-semibold text-[#12679a] hover:underline">Clear all</button>}</div>
           <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Resource type</legend><div className="space-y-1">{typeOptions()}</div></fieldset>
           <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Region</legend><div className="space-y-1">{regionOptions()}</div></fieldset>
+          <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Scientific Voyage</legend><div>{expeditionOptions()}</div></fieldset>
+          <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Observation Dates</legend><div>{yearOptions()}</div></fieldset>
+          
           <div className="border-t border-slate-100 pt-4"><label htmlFor="sort-results" className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Sort results</label><select id="sort-results" value={selectedSort} onChange={(event) => setSelectedSort(event.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:border-sky-600 focus:outline-none"><option value="relevance">Most relevant</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></div>
           <div className="rounded-lg bg-sky-50 p-3 text-xs leading-5 text-slate-600"><p className="font-semibold text-[#245b7c]">How search works</p><p className="mt-1">Results combine keyword matching, semantic relevance and record dates.</p></div>
         </aside>
@@ -199,6 +239,8 @@ function ExploreContent() {
         <div className="flex items-center justify-between border-b border-slate-100 pb-3"><h2 id="filter-dialog-title" className="text-base font-bold text-[#143b5e]">Filter research</h2><button type="button" onClick={() => setMobileFilterOpen(false)} aria-label="Close filters" className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button></div>
         <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Resource type</legend><div className="grid grid-cols-2 gap-2">{typeOptions(true)}</div></fieldset>
         <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Region</legend><div className="grid grid-cols-2 gap-2">{regionOptions(true)}</div></fieldset>
+        <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Scientific Voyage</legend><div>{expeditionOptions()}</div></fieldset>
+        <fieldset><legend className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Observation Dates</legend><div>{yearOptions()}</div></fieldset>
         <button type="button" onClick={() => setMobileFilterOpen(false)} className="min-h-11 w-full rounded-lg bg-[#12679a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0d527d]">Show {totalCount} results</button>
       </section>
     </div>}

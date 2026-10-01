@@ -24,14 +24,15 @@ export default function LoginPage() {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.detail || "Sign in failed. Check your email and password.");
       const role = result.user?.role;
-      if (!["admin", "editor", "reviewer", "viewer"].includes(role)) throw new Error("This account does not have an assigned portal role.");
+      if (!["admin", "editor", "reviewer", "viewer", "submitter"].includes(role)) throw new Error("This account does not have an assigned portal role.");
       window.dispatchEvent(new Event("polar-auth-changed"));
       const next = new URLSearchParams(window.location.search).get("next");
       const roleCanOpenNext = role === "admin"
         || (role === "editor" && ["/admin/content", "/admin/editorial", "/admin/generate"].some((path) => next?.startsWith(path)))
-        || (role === "reviewer" && next?.startsWith("/admin/editorial"));
-      const safeNext = next?.startsWith("/admin") && roleCanOpenNext;
-      router.replace(safeNext ? next! : role === "reviewer" ? "/admin/editorial" : role === "viewer" ? "/" : "/admin/content");
+        || (role === "reviewer" && next?.startsWith("/admin/editorial"))
+        || (role === "submitter" && next?.startsWith("/submitter"));
+      const safeNext = (next?.startsWith("/admin") || next?.startsWith("/submitter")) && roleCanOpenNext;
+      router.replace(safeNext ? next! : role === "reviewer" ? "/admin/editorial" : role === "submitter" ? "/submitter/datasets" : role === "viewer" ? "/" : "/admin/content");
       router.refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to sign in. Please try again.");

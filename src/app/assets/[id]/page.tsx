@@ -151,6 +151,15 @@ export default function AssetDetailPage() {
             <Download className="w-3.5 h-3.5 text-[#12679a]" />
             Download Source File
           </a> : asset.external_url ? <a href={asset.external_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><ExternalLink className="h-4 w-4 text-[#12679a]" />Open source resource</a> : <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-500"><Download className="h-4 w-4" />Source file unavailable</span>}
+
+          <a href={`/api/assets/${asset.id}/export/pdf`} className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-medium flex items-center gap-2">
+            <FileText className="w-3.5 h-3.5 text-red-600" />
+            Export PDF
+          </a>
+          <a href={`/api/assets/${asset.id}/export/xml`} className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-medium flex items-center gap-2">
+            <FileText className="w-3.5 h-3.5 text-amber-600" />
+            Export XML
+          </a>
         </div>
       </div>
 
