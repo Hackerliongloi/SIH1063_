@@ -206,6 +206,28 @@ def get_asset(aid:int,db:Session=Depends(get_db)):
     db.add(ViewLog(asset_id=aid));db.commit()
     return {"asset":serialize_asset(a),"chunks":[{"id":chunk.id,"page":chunk.page,"text":chunk.text} for chunk in chunks],"versions":version_rows,"expedition":expedition}
 
+
+@app.get("/api/storage/{key:path}")
+def stream_storage_file(key: str):
+    try:
+        total = file_size(key)
+    except Exception:
+        raise HTTPException(404, "File not found")
+    if total <= 0:
+        raise HTTPException(404, "File is empty")
+    
+    import mimetypes
+    content_type, _ = mimetypes.guess_type(key)
+    if not content_type:
+        content_type = "application/octet-stream"
+        
+    try:
+        body = stream_file(key, 0, total - 1)
+    except Exception:
+        raise HTTPException(404, "File is unavailable")
+        
+    return StreamingResponse(body, status_code=200, media_type=content_type, headers={"Cache-Control": "public, max-age=3600"})
+
 @app.get("/api/assets/{aid}/media")
 def stream_asset_media(aid:int,request:Request,db:Session=Depends(get_db)):
     asset=db.get(Asset,aid)
