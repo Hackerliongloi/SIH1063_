@@ -1,0 +1,103 @@
+diff --git a/backend/app/embeddings.py b/backend/app/embeddings.py
+index 041b76b..a98ddfe 100644
+--- a/backend/app/embeddings.py
++++ b/backend/app/embeddings.py
+@@ -18,7 +18,9 @@ def embed(text:str,dimensions:int=384)->list[float]:
+     norm=math.sqrt(sum(x*x for x in vector)) or 1.0
+     return [x/norm for x in vector]
+ 
+-def cosine(a:list[float],b:list[float])->float:
+-    if not a or not b:return 0.0
++def cosine(a:list[float]|None,b:list[float]|None)->float:
++    # pgvector drivers may return numpy arrays; checking an array's truth value
++    # is ambiguous, so use None/length checks instead.
++    if a is None or b is None or len(a)==0 or len(b)==0:return 0.0
+     n=min(len(a),len(b));den=math.sqrt(sum(x*x for x in a[:n])*sum(x*x for x in b[:n]))
+     return sum(x*y for x,y in zip(a[:n],b[:n]))/den if den else 0.0
+diff --git a/backend/app/main.py b/backend/app/main.py
+index ce92e28..dc1899b 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -278,7 +278,7 @@ def search(q:str="",type:str|None=None,expedition:str|None=None,year_from:int|No
+         searchable=a.title+" "+a.description+" "+" ".join(c.text for c in chunks)
+         kw=sum(1 for t in terms if t.lower() in searchable.lower())/max(len(terms),1)
+         age=max((datetime.now(timezone.utc)-a.created_at.replace(tzinfo=timezone.utc)).days,0); rec=0.5**(age/365)
+-        semantic=max((cosine(vector,c.embedding or []) for c in chunks),default=0.0)
++        semantic=max((cosine(vector,c.embedding) for c in chunks),default=0.0)
+         if chunks and vector: score=0.4*kw+0.5*max(semantic,0)+0.1*rec
+         else: score=0.4*kw+0.1*rec
+         scored.append((score,a))
+diff --git a/backend/app/modules/feed.py b/backend/app/modules/feed.py
+index 91c3204..6938b2b 100644
+--- a/backend/app/modules/feed.py
++++ b/backend/app/modules/feed.py
+@@ -243,7 +243,7 @@ def discovery_search(q:str="",content_type:str|None=None,region:str|None=None,ex
+     def score_record(title:str,body:str,source_chunks:list[Chunk],published_at:datetime|None,kind:str,record:dict):
+         text=f"{title} {body}".lower()
+         keyword=sum(1 for term in terms if term in text)/max(len(terms),1)
+-        semantic=max((cosine(vector,chunk.embedding or []) for chunk in source_chunks),default=0.0) if vector else 0.0
++        semantic=max((cosine(vector,chunk.embedding) for chunk in source_chunks),default=0.0) if vector else 0.0
+         instant=published_at or now()
+         if instant.tzinfo is None:instant=instant.replace(tzinfo=timezone.utc)
+         age_days=max((now()-instant).total_seconds()/86400,0);recency=0.5**(age_days/365)
+diff --git a/src/lib/api.ts b/src/lib/api.ts
+index becff37..b53cc8e 100644
+--- a/src/lib/api.ts
++++ b/src/lib/api.ts
+@@ -66,7 +66,8 @@ const mockExpeditions = [
+ const mockSearchResults = {
+   results: [
+     {
+-      id: "sr-001",
++      id: "asset-001",
++      asset_id: "asset-001",
+       title: "Adélie Penguin Rookery Census",
+       type: "report",
+       region: "Antarctica",
+@@ -75,7 +76,8 @@ const mockSearchResults = {
+       summary: "Population and breeding activity census around the Maitri observation grid.",
+     },
+     {
+-      id: "sr-002",
++      id: "asset-002",
++      asset_id: "asset-002",
+       title: "Sutri Dhaka Glacier Mass Balance",
+       type: "dataset",
+       region: "Himalaya",
+@@ -89,6 +91,27 @@ const mockSearchResults = {
+ };
+ 
+ function mockResponseFor(endpoint: string): any {
++  const assetDetailMatch = endpoint.match(/^\/assets\/([^/?]+)$/);
++  if (assetDetailMatch) {
++    const id = decodeURIComponent(assetDetailMatch[1]);
++    const hit = mockSearchResults.results.find((item) => item.asset_id === id);
++    if (!hit) return null;
++    return {
++      asset: {
++        id: hit.asset_id,
++        title: hit.title,
++        type: hit.type,
++        region: hit.region,
++        year: hit.year,
++        status: "ready",
++        description: hit.summary,
++      },
++      chunks: [],
++      versions: [],
++      expedition: null,
++    };
++  }
++
+   if (endpoint === "/assets" || endpoint.startsWith("/assets?")) {
+     return mockAssets;
+   }
+@@ -205,7 +228,7 @@ export const api = {
+     const response = await fetchFromAPI(`/search?${q.toString()}`);
+     return {
+       ...response,
+-      results: listFromResponse(response),
++      results: listFromResponse(response).map((item: any) => ({ ...item, asset_id: item.asset_id ?? item.id })),
+       total: response?.total ?? listFromResponse(response).length,
+     };
+   },

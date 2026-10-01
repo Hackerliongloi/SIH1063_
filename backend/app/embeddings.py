@@ -18,7 +18,9 @@ def embed(text:str,dimensions:int=384)->list[float]:
     norm=math.sqrt(sum(x*x for x in vector)) or 1.0
     return [x/norm for x in vector]
 
-def cosine(a:list[float],b:list[float])->float:
-    if not a or not b:return 0.0
+def cosine(a:list[float]|None,b:list[float]|None)->float:
+    # pgvector drivers may return numpy arrays; checking an array's truth value
+    # is ambiguous, so use None/length checks instead.
+    if a is None or b is None or len(a)==0 or len(b)==0:return 0.0
     n=min(len(a),len(b));den=math.sqrt(sum(x*x for x in a[:n])*sum(x*x for x in b[:n]))
     return sum(x*y for x,y in zip(a[:n],b[:n]))/den if den else 0.0

@@ -278,7 +278,7 @@ def search(q:str="",type:str|None=None,expedition:str|None=None,year_from:int|No
         searchable=a.title+" "+a.description+" "+" ".join(c.text for c in chunks)
         kw=sum(1 for t in terms if t.lower() in searchable.lower())/max(len(terms),1)
         age=max((datetime.now(timezone.utc)-a.created_at.replace(tzinfo=timezone.utc)).days,0); rec=0.5**(age/365)
-        semantic=max((cosine(vector,c.embedding or []) for c in chunks),default=0.0)
+        semantic=max((cosine(vector,c.embedding) for c in chunks),default=0.0)
         if chunks and vector: score=0.4*kw+0.5*max(semantic,0)+0.1*rec
         else: score=0.4*kw+0.1*rec
         scored.append((score,a))

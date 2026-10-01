@@ -66,7 +66,8 @@ const mockExpeditions = [
 const mockSearchResults = {
   results: [
     {
-      id: "sr-001",
+      id: "asset-001",
+      asset_id: "asset-001",
       title: "Adélie Penguin Rookery Census",
       type: "report",
       region: "Antarctica",
@@ -75,7 +76,8 @@ const mockSearchResults = {
       summary: "Population and breeding activity census around the Maitri observation grid.",
     },
     {
-      id: "sr-002",
+      id: "asset-002",
+      asset_id: "asset-002",
       title: "Sutri Dhaka Glacier Mass Balance",
       type: "dataset",
       region: "Himalaya",
@@ -89,6 +91,27 @@ const mockSearchResults = {
 };
 
 function mockResponseFor(endpoint: string): any {
+  const assetDetailMatch = endpoint.match(/^\/assets\/([^/?]+)$/);
+  if (assetDetailMatch) {
+    const id = decodeURIComponent(assetDetailMatch[1]);
+    const hit = mockSearchResults.results.find((item) => item.asset_id === id);
+    if (!hit) return null;
+    return {
+      asset: {
+        id: hit.asset_id,
+        title: hit.title,
+        type: hit.type,
+        region: hit.region,
+        year: hit.year,
+        status: "ready",
+        description: hit.summary,
+      },
+      chunks: [],
+      versions: [],
+      expedition: null,
+    };
+  }
+
   if (endpoint === "/assets" || endpoint.startsWith("/assets?")) {
     return mockAssets;
   }
@@ -205,7 +228,7 @@ export const api = {
     const response = await fetchFromAPI(`/search?${q.toString()}`);
     return {
       ...response,
-      results: listFromResponse(response),
+      results: listFromResponse(response).map((item: any) => ({ ...item, asset_id: item.asset_id ?? item.id })),
       total: response?.total ?? listFromResponse(response).length,
     };
   },
