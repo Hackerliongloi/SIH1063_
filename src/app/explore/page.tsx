@@ -12,7 +12,7 @@ import SectionPage from "@/components/SectionPage";
 import { api } from "@/lib/api";
 
 type SearchHit = {
-  asset_id: number | string;
+  id: number | string;
   title: string;
   type?: string;
   region?: string;
@@ -20,18 +20,20 @@ type SearchHit = {
   score?: number;
   score_breakdown?: { w_kw_part?: number; w_sem_part?: number; w_rec_part?: number };
   thumb_key?: string | null;
+  file_key?: string | null;
   expedition?: string | null;
   snippet?: string | null;
   page?: number | string | null;
 };
 
 type ImageHit = {
-  asset_id: number | string;
+  id: number | string;
   title: string;
   region?: string;
   year?: number | string;
   similarity_score?: number;
   thumb_key?: string | null;
+  file_key?: string | null;
   description?: string | null;
 };
 
@@ -102,7 +104,7 @@ function ExploreContent() {
           setTotalCount(Number(response.total) || 0);
           setParsedYears(response.parsed_year_range || null);
         } else {
-          const response = await api.searchImages(query || "polar research");
+          const response = await api.searchImages(query);
           if (!active) return;
           setImageResults(Array.isArray(response.results) ? response.results : []);
           setTotalCount(Number(response.total) || 0);
@@ -217,19 +219,19 @@ function ExploreContent() {
           {searchError ? <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">Search is temporarily unavailable. Please try again.</div>
             : loading ? <div className="grid min-h-56 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500"><div className="flex items-center gap-3 text-sm"><LoaderCircle className="h-5 w-5 animate-spin text-[#277ba5]" />Searching the repository</div></div>
             : activeTab === "hybrid" ? results.length === 0 ? <div className="rounded-xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm"><Database className="mx-auto h-8 w-8 text-slate-400" /><h2 className="mt-3 text-lg font-bold text-[#143b5e]">No matching records</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-600">Try different search terms or broaden the selected filters.</p><button type="button" onClick={clearFilters} className="mt-5 rounded-lg bg-[#12679a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0d527d]">Clear filters</button></div>
-              : <div className="space-y-4">{results.map((hit) => <article key={hit.asset_id} className="group flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-300 hover:shadow-md sm:flex-row sm:p-5">
+              : <div className="space-y-4">{results.map((hit) => <article key={hit.id} className="group flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-300 hover:shadow-md sm:flex-row sm:p-5">
                 {hit.thumb_key && <div className="relative h-44 shrink-0 overflow-hidden rounded-lg bg-slate-100 sm:h-32 sm:w-40"><img src={hit.thumb_key} alt={hit.title} className="h-full w-full object-cover transition-transform group-hover:scale-105" /><span className="absolute bottom-2 left-2 rounded bg-white/95 px-2 py-1 text-[10px] font-bold uppercase text-[#245b7c]">{hit.type || "Resource"}</span></div>}
                 <div className="flex min-w-0 flex-1 flex-col justify-between gap-3">
                   <div><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><span className="inline-flex items-center gap-1 text-xs text-slate-500"><MapPin className="h-3.5 w-3.5" />{hit.region || "Polar regions"}{hit.year ? ` · ${hit.year}` : ""}</span><button type="button" onClick={() => setActiveScoreBreakdown(hit)} className="inline-flex min-h-8 items-center gap-1.5 rounded-full bg-sky-50 px-2.5 text-xs font-semibold text-[#245b7c] hover:bg-sky-100" aria-label={`View relevance details for ${hit.title}`}><Sparkles className="h-3.5 w-3.5" />Relevance {typeof hit.score === "number" ? hit.score.toFixed(2) : "details"}<Info className="h-3 w-3" /></button></div>
-                    <Link href={`/assets/${hit.asset_id}`} className="text-base font-bold leading-snug text-[#143b5e] hover:text-[#12679a]">{hit.title}</Link>
+                    <Link href={`/assets/${hit.id}`} className="text-base font-bold leading-snug text-[#143b5e] hover:text-[#12679a]">{hit.title}</Link>
                     {hit.expedition && <p className="mt-1 text-xs text-slate-500">{hit.expedition}</p>}
                     {hit.snippet && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">{hit.snippet}</p>}
                   </div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500"><span>{hit.page ? `Matched on page ${hit.page}` : "Research archive record"}</span><Link href={`/assets/${hit.asset_id}`} className="inline-flex min-h-8 items-center gap-1 font-semibold text-[#12679a] hover:underline">View record <ArrowRight className="h-3.5 w-3.5" /></Link></div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500"><span>{hit.page ? `Matched on page ${hit.page}` : "Research archive record"}</span><Link href={`/assets/${hit.id}`} className="inline-flex min-h-8 items-center gap-1 font-semibold text-[#12679a] hover:underline">View record <ArrowRight className="h-3.5 w-3.5" /></Link></div>
                 </div>
               </article>)}</div>
               : imageResults.length === 0 ? <div className="rounded-xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm"><ImageIcon className="mx-auto h-8 w-8 text-slate-400" /><h2 className="mt-3 text-lg font-bold text-[#143b5e]">No matching images</h2><p className="mt-2 text-sm text-slate-600">Try a different description or a broader search.</p></div>
-                : <div className="grid gap-4 sm:grid-cols-2">{imageResults.map((photo) => <article key={photo.asset_id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-[4/3] bg-slate-100">{photo.thumb_key ? <img src={photo.thumb_key} alt={photo.title} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-400"><ImageIcon className="h-8 w-8" /></div>}<span className="absolute right-2 top-2 rounded-full bg-white/95 px-2.5 py-1 text-xs font-semibold text-teal-800">Similarity {typeof photo.similarity_score === "number" ? photo.similarity_score.toFixed(2) : "—"}</span></div><div className="p-4"><p className="text-xs text-slate-500">{photo.region || "Polar regions"}{photo.year ? ` · ${photo.year}` : ""}</p><h2 className="mt-1 font-bold text-[#143b5e]">{photo.title}</h2>{photo.description && <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{photo.description}</p>}<Link href={`/assets/${photo.asset_id}`} className="mt-4 inline-flex min-h-9 items-center gap-1 text-sm font-semibold text-[#12679a] hover:underline">View image record <ArrowRight className="h-4 w-4" /></Link></div></article>)}</div>}
+                : <div className="grid gap-4 sm:grid-cols-2">{imageResults.map((photo) => <article key={photo.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="relative aspect-[4/3] bg-slate-100">{photo.thumb_key ? <img src={photo.thumb_key} alt={photo.title} className="h-full w-full object-cover" /> : photo.file_key ? <img src={`/api/storage/${photo.file_key}`} alt={photo.title} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-400"><ImageIcon className="h-8 w-8" /></div>}<span className="absolute right-2 top-2 rounded-full bg-white/95 px-2.5 py-1 text-xs font-semibold text-teal-800">Similarity {typeof photo.similarity_score === "number" ? photo.similarity_score.toFixed(2) : "—"}</span></div><div className="p-4"><p className="text-xs text-slate-500">{photo.region || "Polar regions"}{photo.year ? ` · ${photo.year}` : ""}</p><h2 className="mt-1 font-bold text-[#143b5e]">{photo.title}</h2>{photo.description && <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-600">{photo.description}</p>}<Link href={`/assets/${photo.id}`} className="mt-4 inline-flex min-h-9 items-center gap-1 text-sm font-semibold text-[#12679a] hover:underline">View image record <ArrowRight className="h-4 w-4" /></Link></div></article>)}</div>}
         </main>
       </div>
     </div>

@@ -304,13 +304,17 @@ def search(q:str="",type:str|None=None,expedition:str|None=None,year_from:int|No
         stmt=stmt.where(Asset.id.in_(matched))
     terms=[x for x in q.split() if len(x)>1]
     vector=embed(q) if q.strip() else []
-    if q.strip() and db.bind.dialect.name=="postgresql":
-        lexical_ids=db.scalars(select(Chunk.asset_id).join(Asset,Asset.id==Chunk.asset_id).where(Asset.status=="ready",func.to_tsvector("english",Chunk.text).op("@@")(func.plainto_tsquery("english",q))).limit(50)).all()
-        distance=type_coerce(Chunk.embedding,Vector(384)).cosine_distance(vector)
-        semantic_ids=db.scalars(select(Chunk.asset_id).join(Asset,Asset.id==Chunk.asset_id).where(Asset.status=="ready",Chunk.embedding.is_not(None)).order_by(distance).limit(50)).all()
-        title_ids=db.scalars(select(Asset.id).where(Asset.status=="ready",or_(*[or_(Asset.title.ilike(f"%{t}%"),Asset.description.ilike(f"%{t}%")) for t in terms])).limit(50)).all() if terms else []
-        candidate_ids=set(lexical_ids)|set(semantic_ids)|set(title_ids)
-        stmt=stmt.where(Asset.id.in_(candidate_ids))
+    if q.strip():
+        if db.bind.dialect.name=="postgresql":
+            lexical_ids=db.scalars(select(Chunk.asset_id).join(Asset,Asset.id==Chunk.asset_id).where(Asset.status=="ready",func.to_tsvector("english",Chunk.text).op("@@")(func.plainto_tsquery("english",q))).limit(50)).all()
+            distance=type_coerce(Chunk.embedding,Vector(384)).cosine_distance(vector)
+            semantic_ids=db.scalars(select(Chunk.asset_id).join(Asset,Asset.id==Chunk.asset_id).where(Asset.status=="ready",Chunk.embedding.is_not(None)).order_by(distance).limit(50)).all()
+            title_ids=db.scalars(select(Asset.id).where(Asset.status=="ready",or_(*[or_(Asset.title.ilike(f"%{t}%"),Asset.description.ilike(f"%{t}%")) for t in terms])).limit(50)).all() if terms else []
+            candidate_ids=set(lexical_ids)|set(semantic_ids)|set(title_ids)
+            stmt=stmt.where(Asset.id.in_(candidate_ids))
+        else:
+            title_ids=db.scalars(select(Asset.id).where(Asset.status=="ready",or_(*[or_(Asset.title.ilike(f"%{t}%"),Asset.description.ilike(f"%{t}%")) for t in terms]))).all() if terms else []
+            stmt=stmt.where(Asset.id.in_(title_ids))
     rows=db.scalars(stmt.order_by(Asset.created_at.desc()).limit(500)).all(); scored=[]
     for a in rows:
         chunks=db.scalars(select(Chunk).where(Chunk.asset_id==a.id)).all()
@@ -324,11 +328,13 @@ def search(q:str="",type:str|None=None,expedition:str|None=None,year_from:int|No
     scored.sort(key=lambda x:x[0],reverse=True)
     db.add(SearchLog(query=q,filters_json={"type":type,"region":region,"station":station,"year_from":year_from,"year_to":year_to},n_results=len(scored)));db.commit()
     start=(max(page,1)-1)*20
-    return {"items":[{**serialize_asset(a),"score":round(s,4)} for s,a in scored[start:start+20]],"total":len(scored),"page":page,"page_size":20,"mode":"keyword+local semantic hashing embeddings+recency"}
+    return {"items":[{**serialize_asset(a),"score":round(float(s),4)} for s,a in scored[start:start+20]],"total":len(scored),"page":page,"page_size":20,"mode":"keyword+local semantic hashing embeddings+recency"}
 @app.get("/api/search/images")
-def image_search(q:str,db:Session=Depends(get_db)):
-    if not q.strip(): raise HTTPException(422,"Query required")
-    items=db.scalars(select(Asset).where(Asset.type=="photo",Asset.status=="ready",or_(Asset.title.ilike(f"%{q}%"),Asset.description.ilike(f"%{q}%"))).limit(50)).all()
+def image_search(q:str="",db:Session=Depends(get_db)):
+    stmt = select(Asset).where(Asset.type=="photo",Asset.status=="ready")
+    if q.strip():
+        stmt = stmt.where(or_(Asset.title.ilike(f"%{q}%"),Asset.description.ilike(f"%{q}%")))
+    items=db.scalars(stmt.order_by(Asset.created_at.desc()).limit(50)).all()
     return {"items":[serialize_asset(a) for a in items],"total":len(items),"mode":"text fallback; configure a local CLIP provider for semantic image retrieval"}
 
 @app.get("/api/editorial/drafts")
