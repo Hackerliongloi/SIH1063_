@@ -92,6 +92,10 @@ export default function Navbar() {
           <div className="flex items-center gap-0.5">
             <Link href="/" className={navClass("/")}>Home</Link>
             <Link href="/discover" className={navClass("/discover")}>Posts and reels</Link>
+            <Link href="/community" className={navClass("/community")}>Community</Link>
+            {sessionRole === "public_user" && (
+              <Link href="/community/inbox" className={navClass("/community/inbox")}>Inbox</Link>
+            )}
             {navigationGroups.map((group) => (
               <button key={group.label} type="button" onMouseEnter={() => setOpenGroup(group.label)} onFocus={() => setOpenGroup(group.label)} onClick={() => setOpenGroup((current) => current === group.label ? null : group.label)} aria-expanded={openGroup === group.label} className={`inline-flex items-center gap-1 rounded-md px-2.5 py-2 text-[13px] font-semibold transition-colors ${openGroup === group.label ? "bg-sky-50 text-[#12679a]" : "text-slate-700 hover:bg-slate-50 hover:text-[#12679a]"}`}>
                 {group.label}<ChevronDown className={`h-3.5 w-3.5 transition-transform ${openGroup === group.label ? "rotate-180" : ""}`} />
@@ -128,6 +132,10 @@ export default function Navbar() {
         <nav id="mobile-navigation" aria-label="Mobile navigation" className="max-h-[75vh] overflow-y-auto border-t border-slate-200 bg-white px-4 py-3 lg:hidden">
           <Link href="/" onClick={() => setMobileOpen(false)} className="block rounded-lg px-3 py-3 font-semibold text-[#143b5e] hover:bg-sky-50">Home</Link>
           <Link href="/discover" onClick={() => setMobileOpen(false)} className="block rounded-lg px-3 py-3 font-semibold text-[#143b5e] hover:bg-sky-50">Posts and reels</Link>
+          <Link href="/community" onClick={() => setMobileOpen(false)} className="block rounded-lg px-3 py-3 font-semibold text-[#143b5e] hover:bg-sky-50">Community</Link>
+          {sessionRole === "public_user" && (
+            <Link href="/community/inbox" onClick={() => setMobileOpen(false)} className="block rounded-lg px-3 py-3 font-semibold text-[#143b5e] hover:bg-sky-50">Inbox</Link>
+          )}
           {navigationGroups.map((group) => (
             <section key={group.label} className="border-t border-slate-100">
               <button type="button" onClick={() => setMobileGroup((current) => current === group.label ? null : group.label)} className="flex min-h-12 w-full items-center justify-between px-3 py-3 text-left font-semibold text-[#143b5e]" aria-expanded={mobileGroup === group.label}>
