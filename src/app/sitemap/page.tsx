@@ -6,8 +6,8 @@ import { navigationGroups } from "@/lib/site-content";
 const portalLinks = [
   { label: "Home", href: "/" }, { label: "News & updates", href: "/news" },
   { label: "Tenders", href: "/tenders" }, { label: "Careers", href: "/careers" },
-  { label: "Photo gallery", href: "/gallery" }, { label: "Discover", href: "/discover" },
-  { label: "Science stories", href: "/stories" }, { label: "Research archive", href: "/explore" },
+  { label: "Photo gallery", href: "/gallery" }, { label: "Community", href: "/community" },
+  { label: "Research archive", href: "/explore" },
   { label: "Data centre", href: "/data-centre" }, { label: "Accessibility", href: "/accessibility" },
   { label: "Contact", href: "/contact" }, { label: "RSS feed", href: "/rss.xml" },
 ];

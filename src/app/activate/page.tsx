@@ -58,9 +58,14 @@ function ActivateContent() {
         <div className="rounded-lg bg-red-50 p-4 text-red-800">
           <p className="font-semibold">Activation Failed</p>
           <p className="mt-2 text-sm">{message}</p>
-          <Link href="/register" className="mt-4 inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50">
-            Register again
-          </Link>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link href="/register" className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50">
+              Register again
+            </Link>
+            <Link href="/submitter/register" className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50">
+              Apply as Submitter again
+            </Link>
+          </div>
         </div>
       )}
     </div>

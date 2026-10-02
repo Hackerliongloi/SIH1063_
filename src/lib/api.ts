@@ -202,6 +202,10 @@ export const api = {
     return listFromResponse(response);
   },
   getAsset: (id: string) => fetchFromAPI(`/assets/${id}`),
+  transitionDataset: (id: string, action: string, comment?: string) => fetchFromAPI(`/datasets/${id}/transition`, {
+    method: "POST",
+    body: JSON.stringify({ action, comment }),
+  }),
 
   // Hybrid Search
   search: async (params: {

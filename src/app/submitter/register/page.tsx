@@ -16,7 +16,7 @@ export default function RegisterPage() {
     setError("");
     setSubmitting(true);
     try {
-      const response = await fetch("/api/auth/public/register", {
+      const response = await fetch("/api/auth/register", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
@@ -34,8 +34,8 @@ export default function RegisterPage() {
     <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-sm sm:p-9">
       <div className="mb-7 grid h-12 w-12 place-items-center rounded-xl bg-sky-100 text-[#12679a]"><LogIn className="h-6 w-6" /></div>
       <p className="text-xs font-bold uppercase tracking-[0.15em] text-[#3982a8]">NCPOR portal</p>
-      <h1 className="mt-2 text-2xl font-bold text-[#143b5e]">Community Registration</h1>
-      <p className="mt-2 text-sm leading-6 text-slate-600">Register to join the community, like posts, and participate.</p>
+      <h1 className="mt-2 text-2xl font-bold text-[#143b5e]">Submitter Registration</h1>
+      <p className="mt-2 text-sm leading-6 text-slate-600">Register as a submitter to upload and manage your datasets.</p>
       
       {success ? (
         <div className="mt-7 rounded-lg bg-green-50 p-4 text-green-800">
@@ -52,7 +52,7 @@ export default function RegisterPage() {
       )}
       <div className="mt-5 flex items-center justify-between">
         <Link href="/login" className="inline-block text-sm font-semibold text-[#12679a] hover:underline">Sign in instead</Link>
-        <Link href="/submitter/register" className="inline-block text-sm font-semibold text-[#12679a] hover:underline">Apply as Submitter</Link>
+        <Link href="/register" className="inline-block text-sm font-semibold text-[#12679a] hover:underline">Register for Community</Link>
       </div>
     </div>
   </section>;
