@@ -23,7 +23,7 @@ export default function Footer() {
       <div className="border-t border-white/15">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 text-xs text-white/75 sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
           <p>National Centre for Polar and Ocean Research | Ministry of Earth Sciences, Government of India</p>
-          <nav aria-label="Policies and help" className="flex flex-wrap gap-x-4 gap-y-2"><Link href="/institution/disclaimer" className="hover:text-white">Disclaimer</Link><Link href="/institution/copyright" className="hover:text-white">Copyright policy</Link><Link href="/accessibility" className="hover:text-white">Accessibility</Link><Link href="/sitemap" className="hover:text-white">Sitemap</Link><Link href="/rss.xml" className="inline-flex items-center gap-1 hover:text-white">RSS feed <ArrowUpRight className="h-3 w-3" /></Link></nav>
+          <nav aria-label="Policies and help" className="flex flex-wrap gap-x-4 gap-y-2"><Link href="/institution/disclaimer" className="hover:text-white">Disclaimer</Link><Link href="/institution/copyright" className="hover:text-white">Copyright policy</Link><Link href="/accessibility" className="hover:text-white">Accessibility</Link><Link href="/sitemap" className="hover:text-white">Sitemap</Link><a href="/rss.xml" className="inline-flex items-center gap-1 hover:text-white">RSS feed <ArrowUpRight className="h-3 w-3" /></a></nav>
         </div>
       </div>
     </footer>

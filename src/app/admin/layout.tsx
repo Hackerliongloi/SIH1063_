@@ -19,8 +19,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     fetch("/api/auth/session", { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error("Not signed in");
       return response.json();
-    }).then((session: SessionUser) => {
+    }).then((session: SessionUser | null) => {
       if (cancelled) return;
+      if (!session) {
+        setChecking(false);
+        router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+        return;
+      }
       setUser(session);
       const roleAllowsPage = session.role === "admin"
         || (session.role === "editor" && ["/admin/content", "/admin/editorial", "/admin/generate"].some((path) => pathname.startsWith(path)))

@@ -77,6 +77,13 @@ async function forward(request: NextRequest, path: string[], method: string) {
     return response;
   }
 
+  if (isSession && upstream.status === 401) {
+    const response = NextResponse.json(null, { status: 200 });
+    clearTokens(response);
+    response.headers.set("cache-control", "no-store");
+    return response;
+  }
+
   const responseBody = await upstream.arrayBuffer();
   const response = new NextResponse(responseBody.byteLength ? responseBody : null, { status: upstream.status });
   const responseContentType = upstream.headers.get("content-type");
