@@ -68,6 +68,24 @@ def extract_text(data:bytes,suffix:str)->str:
         ds=xr.open_dataset(io.BytesIO(data));return f"NetCDF variables: {', '.join(ds.data_vars)}\nDimensions: {dict(ds.sizes)}"
     return ""
 
+def generate_video_poster(file_data: bytes, suffix: str) -> bytes | None:
+    try:
+        import av
+        import io
+        container = av.open(io.BytesIO(file_data))
+        video = next((s for s in container.streams if s.type == "video"), None)
+        if not video:
+            return None
+        for frame in container.decode(video):
+            img = frame.to_image()
+            img.thumbnail((640, 640))
+            out = io.BytesIO()
+            img.save(out, format='JPEG')
+            return out.getvalue()
+    except Exception as e:
+        logging.warning("Video poster generation failed: %s", e)
+    return None
+
 def enqueue_ingestion(asset_id:int,key:str,suffix:str)->bool:
     try:
         from redis import Redis

@@ -27,13 +27,15 @@ export default function LoginPage() {
       if (!["admin", "editor", "reviewer", "viewer", "submitter", "public_user", "pending_submitter"].includes(role)) throw new Error("This account does not have an assigned portal role.");
       window.dispatchEvent(new Event("polar-auth-changed"));
       const next = new URLSearchParams(window.location.search).get("next");
-      const roleCanOpenNext = role === "admin"
-        || (role === "editor" && ["/admin/content", "/admin/editorial", "/admin/generate"].some((path) => next?.startsWith(path)))
-        || (role === "reviewer" && next?.startsWith("/admin/editorial"))
-        || (role === "submitter" && next?.startsWith("/submitter"))
-        || (role === "pending_submitter" && next?.startsWith("/submitter/pending"));
-      const safeNext = (next?.startsWith("/admin") || next?.startsWith("/submitter")) && roleCanOpenNext;
-      router.replace(safeNext ? next! : role === "reviewer" ? "/admin/editorial" : role === "submitter" ? "/submitter/datasets" : role === "pending_submitter" ? "/submitter/pending" : role === "public_user" ? "/community" : role === "viewer" ? "/" : "/admin/content");
+      const safeNext = next && next.startsWith("/") && !next.startsWith("//") && (
+        (role === "admin")
+        || (role === "editor" && ["/admin/content", "/admin/editorial", "/admin/generate", "/admin/reels", "/admin/analytics", "/submitter"].some((path) => next.startsWith(path)))
+        || (role === "reviewer" && ["/admin/editorial", "/admin/reels", "/admin/analytics"].some((path) => next.startsWith(path)))
+        || (role === "submitter" && next.startsWith("/submitter"))
+        || (role === "pending_submitter" && next.startsWith("/submitter/pending"))
+        || (role === "public_user" && next.startsWith("/community"))
+      );
+      router.replace(safeNext ? next! : role === "reviewer" ? "/admin/editorial" : (role === "admin" || role === "editor") ? "/admin/content" : role === "submitter" ? "/submitter/datasets" : role === "pending_submitter" ? "/submitter/pending" : role === "public_user" ? "/community" : "/");
       router.refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to sign in. Please try again.");
@@ -46,8 +48,8 @@ export default function LoginPage() {
     <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-sm sm:p-9">
       <div className="mb-7 grid h-12 w-12 place-items-center rounded-xl bg-sky-100 text-[#12679a]"><LogIn className="h-6 w-6" /></div>
       <p className="text-xs font-bold uppercase tracking-[0.15em] text-[#3982a8]">NCPOR portal</p>
-      <h1 className="mt-2 text-2xl font-bold text-[#143b5e]">Staff and account sign in</h1>
-      <p className="mt-2 text-sm leading-6 text-slate-600">Sign in with an account issued by your portal administrator. Public research pages remain available without an account.</p>
+      <h1 className="mt-2 text-2xl font-bold text-[#143b5e]">Account sign in</h1>
+      <p className="mt-2 text-sm leading-6 text-slate-600">Sign in to access your account. Public research pages remain available without an account.</p>
       <form className="mt-7 space-y-4" onSubmit={signIn}>
         <div><label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-slate-700">Email</label><input id="email" name="email" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 outline-none focus:border-sky-600 focus:ring-2 focus:ring-sky-100" /></div>
         <div><label htmlFor="password" className="mb-1.5 block text-sm font-semibold text-slate-700">Password</label><input id="password" name="password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 outline-none focus:border-sky-600 focus:ring-2 focus:ring-sky-100" /></div>

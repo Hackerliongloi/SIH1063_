@@ -20,10 +20,10 @@ export default function DatasetDetailPage() {
 
   const loadDataset = async () => {
     try {
-      const res = await fetch(`/api/assets/${id}`);
+      const res = await fetch(`/api/submitter/datasets/${id}`);
       if (!res.ok) throw new Error("Dataset not found");
       const data = await res.json();
-      setDataset(data);
+      setDataset(data.asset);
     } catch (e: any) {
       setError(e.message);
     } finally {

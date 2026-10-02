@@ -17,6 +17,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { getMediaUrl } from "@/lib/media";
 
 type AssetRecord = { id: string | number; title: string; type: string; region?: string; year?: number | string; version?: number | string; status?: string; description?: string; file_key?: string | null; thumb_key?: string | null; external_url?: string | null };
 type AssetChunk = { id: string | number; page?: number | string | null; text: string };
@@ -164,10 +165,10 @@ export default function AssetDetailPage() {
       </div>
 
       {/* Photo View / Media Display if photo */}
-      {(asset.type === "photo" || asset.type === "video") && (asset.thumb_key || asset.file_key) && (
+      {(asset.type === "photo" || asset.type === "video") && (asset.thumb_key || asset.file_key || asset.external_url) && (
         <div className="polar-card overflow-hidden rounded-2xl bg-white p-3">
           <div className="relative max-h-[600px] w-full rounded-xl overflow-hidden flex items-center justify-center bg-white">
-            {asset.type === "video" ? <video src={`/api/storage/${asset.file_key}`} poster={asset.thumb_key || undefined} controls playsInline preload="metadata" className="max-h-[550px] w-full rounded-lg object-contain" /> : <img src={asset.thumb_key || ""} alt={asset.title} className="max-h-[550px] w-auto rounded-lg object-contain" />}
+            {asset.type === "video" ? <video src={`/api/assets/${asset.id}/media`} poster={getMediaUrl(asset.thumb_key) || undefined} controls playsInline preload="metadata" className="max-h-[550px] w-full rounded-lg object-contain" /> : <img src={getMediaUrl(asset.thumb_key) || getMediaUrl(asset.file_key) || getMediaUrl(asset.external_url) || ""} alt={asset.title} className="max-h-[550px] w-auto rounded-lg object-contain" />}
           </div>
           <p className="text-xs font-mono text-slate-500 text-center pt-3">
             High-Resolution Polar Field Imagery • 512-dim CLIP Vector Indexed

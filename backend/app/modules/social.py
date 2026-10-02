@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select, or_, and_
+from sqlalchemy import select, or_, and_, func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
@@ -93,12 +93,24 @@ def toggle_like(content_type: str, content_id: int, db: Session = Depends(get_db
     if existing:
         db.delete(existing)
         liked = False
+        if feed_item_id and item:
+            item.like_count = max(0, item.like_count - 1)
     else:
         db.add(SocialLike(user_id=u.id, feed_item_id=feed_item_id, story_id=story_id))
         liked = True
-        
+        if feed_item_id and item:
+            item.like_count += 1
+            
     db.commit()
-    return {"liked": liked}
+    
+    current_count = 0
+    if feed_item_id and item:
+        current_count = item.like_count
+    elif story_id:
+        current_count = db.scalar(select(func.count()).select_from(SocialLike).where(SocialLike.story_id == story_id)) or 0
+        
+    return {"liked": liked, "like_count": current_count}
+
 
 # Shares endpoint
 @router.post("/shares", status_code=201)

@@ -12,17 +12,29 @@ export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: a
   const handleLike = async () => {
     if (isLiking) return;
     setIsLiking(true);
+    
+    const originalLiked = liked;
+    const originalCount = likeCount;
+    setLiked(!liked);
+    setLikeCount(liked ? Math.max(0, likeCount - 1) : likeCount + 1);
+
     try {
       const type = item._type === 'story' ? 'story' : 'feed_item';
       const res = await fetch(`/api/social/content/${type}/${item.id}/like`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         setLiked(data.liked);
-        if (data.liked) setLikeCount((prev: number) => prev + 1);
-        else setLikeCount((prev: number) => Math.max(0, prev - 1));
+        if (data.like_count !== undefined) {
+          setLikeCount(data.like_count);
+        }
+      } else {
+        setLiked(originalLiked);
+        setLikeCount(originalCount);
       }
     } catch (e) {
       console.error(e);
+      setLiked(originalLiked);
+      setLikeCount(originalCount);
     } finally {
       setIsLiking(false);
     }
@@ -33,7 +45,7 @@ export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: a
   const title = isStory ? item.title : (item.title || item.caption);
   const description = isStory ? item.summary : item.description;
   const media = isStory ? (item.slides?.[0]?.asset_url || '') : (item.primary_asset?.external_url || item.video_url || '');
-  const author = item.source || 'Editorial Team';
+  const author = item.source || 'NCPOR';
 
   const handleMediaClick = () => {
     if (isStory && onStoryClick) onStoryClick(item);
@@ -51,7 +63,7 @@ export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: a
             </div>
           </div>
           <div>
-            <h3 className="font-semibold text-slate-800 text-sm">{author}</h3>
+            <h3 className="font-semibold text-slate-800 text-sm">{item.source ? author : 'NCPOR'}</h3>
             <p className="text-xs text-slate-500">
               {new Date(item.published_at || item.created_at).toLocaleDateString()}
             </p>

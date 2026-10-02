@@ -184,7 +184,13 @@ export function CommunityFeed() {
       )}
       
       {activeReel && (
-        <ReelViewer item={activeReel} onClose={() => setActiveReel(null)} onShare={setShareItem} />
+        <ReelViewer 
+          initialItem={activeReel} 
+          reelsList={feedItems.filter(item => item.kind === 'reel' || item._type === 'reel')}
+          onClose={() => setActiveReel(null)} 
+          onShare={setShareItem} 
+          onLoadMore={cursor ? handleLoadMore : undefined}
+        />
       )}
     </div>
   );

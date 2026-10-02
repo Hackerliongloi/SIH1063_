@@ -232,7 +232,7 @@ export const api = {
     const response = await fetchFromAPI(`/search?${q.toString()}`);
     return {
       ...response,
-      results: listFromResponse(response).map((item: any) => ({ ...item, asset_id: item.asset_id ?? item.id })),
+      results: listFromResponse(response).map((item: any) => ({ ...item, ...(item.record || {}), asset_id: item.asset_id ?? item.record?.id ?? item.id })),
       total: response?.total ?? listFromResponse(response).length,
     };
   },

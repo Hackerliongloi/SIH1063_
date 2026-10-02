@@ -568,6 +568,21 @@ app.include_router(social_router,prefix="/api/social")
 def get_submitter_datasets(db:Session=Depends(get_db),u=Depends(require_roles("submitter", "admin", "editor"))):
     return [serialize_asset(a) for a in db.scalars(select(Asset).where(Asset.created_by==u.id).order_by(Asset.updated_at.desc()))]
 
+@app.get("/api/submitter/datasets/{id}")
+def get_submitter_dataset(id:int,db:Session=Depends(get_db),u=Depends(require_roles("submitter", "admin", "editor"))):
+    a = db.get(Asset, id)
+    if not a: raise HTTPException(404, "Asset not found")
+    if a.created_by != u.id and u.role not in {"admin", "editor"}: raise HTTPException(403, "Not authorized")
+    
+    chunks = db.scalars(select(Chunk).where(Chunk.asset_id == id).order_by(Chunk.idx, Chunk.id)).all()
+    versions = db.scalars(select(AssetVersion).where(AssetVersion.asset_id == id).order_by(AssetVersion.version.desc())).all()
+    expedition = {"id":a.expedition.id,"name":a.expedition.name,"stations":a.expedition.stations or []} if a.expedition else None
+    version_rows = [{"version":row.version,"timestamp":row.created_at.isoformat() if row.created_at else None,"title":row.snapshot_json.get("title",a.title)} for row in versions]
+    if not version_rows:
+        version_rows = [{"version":a.version,"timestamp":a.updated_at.isoformat() if a.updated_at else None,"title":a.title}]
+        
+    return {"asset":serialize_asset(a),"chunks":[{"id":chunk.id,"page":chunk.page,"text":chunk.text} for chunk in chunks],"versions":version_rows,"expedition":expedition}
+
 @app.post("/api/datasets", status_code=201)
 def create_dataset_draft(data:AssetIn,db:Session=Depends(get_db),u=Depends(require_roles("submitter", "admin", "editor"))):
     if data.type not in ASSET_TYPES: raise HTTPException(422,"Unsupported asset type")
