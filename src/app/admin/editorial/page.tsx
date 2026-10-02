@@ -353,7 +353,7 @@ export default function EditorialDeskPage() {
 
                     {selectedDraft.status === "published" && (
                       <Link
-                        href={`/stories/${selectedDraft.id}`}
+                        href={`/community?story_id=${selectedDraft.id}`}
                         className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium flex items-center gap-1.5"
                       >
                         View Public Story Page <ArrowRight className="w-3.5 h-3.5" />

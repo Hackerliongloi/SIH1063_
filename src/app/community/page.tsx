@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import { CommunityFeed } from '@/components/social/CommunityFeed';
 import { Metadata } from 'next';
 
@@ -14,7 +14,9 @@ export default function CommunityPage() {
         <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Community</h1>
         <p className="text-slate-500 mt-1">Discover updates from our expeditions and researchers</p>
       </div>
-      <CommunityFeed />
+      <Suspense fallback={<div className="flex justify-center p-20"><div className="w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+        <CommunityFeed />
+      </Suspense>
     </div>
   );
 }

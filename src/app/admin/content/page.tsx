@@ -55,7 +55,7 @@ export default function AdminContentPage() {
     setLoadError(null);
     try {
       const [assetsRes, expRes] = await Promise.all([
-        Promise.all([api.getLiveAssets("ready"), api.getLiveAssets("processing"), api.getLiveAssets("failed")]),
+        Promise.all([api.getLiveAssets("ready"), api.getLiveAssets("processing"), api.getLiveAssets("failed"), api.getLiveAssets("in_review")]),
         api.getLiveExpeditions(),
       ]);
       setAssets(assetsRes.flatMap((items) => responseList(items, (item): item is AssetRecord => isRecord(item) && (typeof item.id === "string" || typeof item.id === "number") && typeof item.title === "string")));
@@ -76,12 +76,25 @@ export default function AdminContentPage() {
     ? "border-emerald-200 bg-emerald-50 text-emerald-800"
     : status === "processing"
       ? "border-amber-200 bg-amber-50 text-amber-800"
-      : "border-rose-200 bg-rose-50 text-rose-800";
+      : status === "in_review"
+        ? "border-purple-200 bg-purple-50 text-purple-800"
+        : "border-rose-200 bg-rose-50 text-rose-800";
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadData(); }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  const handleTransition = async (id: string | number, action: string) => {
+    setLoading(true);
+    try {
+      await api.transitionDataset(id.toString(), action);
+      await loadData();
+    } catch (err: any) {
+      setLoadError(err.message || "Failed to transition dataset");
+      setLoading(false);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -225,6 +238,14 @@ export default function AdminContentPage() {
                     </span>
                   </td>
                   <td className="space-x-2 px-5 py-4 text-right text-xs font-semibold">
+                    {a.status === "in_review" && (
+                      <>
+                        <button onClick={() => handleTransition(a.id, 'approve')} className="text-emerald-700 hover:underline">Approve</button>
+                        <span>•</span>
+                        <button onClick={() => handleTransition(a.id, 'request_changes')} className="text-rose-700 hover:underline">Reject</button>
+                        <span>•</span>
+                      </>
+                    )}
                     <Link
                       href={`/assets/${a.id}`}
                       className="text-[#12679a] hover:underline"

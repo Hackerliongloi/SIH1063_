@@ -84,7 +84,7 @@ class AssetIn(BaseModel): type:str; title:str; description:str=""; expedition_id
 class DraftIn(BaseModel): kind:str; title:str; body_md:str=""; tone:str="general_public"; expedition_id:int|None=None; ai_assisted:bool=False
 class TransitionIn(BaseModel): action:str; comment:str=""; scheduled_at:str|None=None
 class EditorialCommentIn(BaseModel): comment:str=Field(min_length=1,max_length=5000)
-ASSET_TYPES={"report","dataset","publication","photo","video","activity"}; ROLES={"admin","editor","reviewer","viewer","submitter"}
+ASSET_TYPES={"report","dataset","publication","photo","video","activity"}; ROLES={"admin","editor","reviewer","viewer","submitter","public_user","pending_submitter"}
 def serialize_asset(a): return {"id":a.id,"type":a.type,"title":a.title,"description":a.description,"expedition_id":a.expedition_id,"expedition":a.expedition.name if a.expedition else None,"region":a.region,"station":a.station,"year":a.year,"file_key":a.file_key,"thumb_key":a.thumb_key,"external_url":a.external_url,"status":a.status,"error":a.error,"version":a.version,"metadata":a.metadata_json,"created_at":a.created_at.isoformat() if a.created_at else None}
 def serialize_draft(d): return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at}
 def serialize_public_draft(d,db):
@@ -106,7 +106,8 @@ def metrics(db:Session=Depends(get_db)):
 def login(data:Login,request:Request,db:Session=Depends(get_db)):
     enforce_rate_limit(request,"login",10,300)
     u=db.scalar(select(User).where(User.email==data.email.lower()))
-    if not u or not u.is_active or not verify_password(data.password,u.password_hash): raise HTTPException(401,"Invalid email or password")
+    if not u or not verify_password(data.password,u.password_hash): raise HTTPException(401,"Invalid email or password")
+    if not u.is_active: raise HTTPException(401,"Account not activated")
     return {"access_token":token_for(u),"refresh_token":token_for(u,"refresh"),"token_type":"bearer","expires_in":settings.access_token_minutes*60,"user":{"id":u.id,"email":u.email,"role":u.role}}
 @app.post("/api/auth/refresh")
 def refresh(payload:dict,db:Session=Depends(get_db)):
@@ -156,7 +157,7 @@ def register(data:RegisterIn,request:Request,db:Session=Depends(get_db)):
     import secrets, hashlib
     from datetime import timedelta, timezone
     if db.scalar(select(User).where(User.email==data.email.lower())): raise HTTPException(409,"Email already registered")
-    u=User(email=data.email.lower(),password_hash=hash_password(data.password),role="submitter",is_active=False)
+    u=User(email=data.email.lower(),password_hash=hash_password(data.password),role="pending_submitter",is_active=False)
     db.add(u);db.flush()
     raw_token=secrets.token_urlsafe(32)
     token_hash=hashlib.sha256(raw_token.encode()).hexdigest()
@@ -187,6 +188,15 @@ def create_user(data:UserIn,db:Session=Depends(get_db),u=Depends(require_roles("
     row=User(email=data.email.lower(),password_hash=hash_password(data.password),role=data.role); db.add(row);db.commit();db.refresh(row);return {"id":row.id,"email":row.email,"role":row.role}
 @app.get("/api/users")
 def users(db:Session=Depends(get_db),u=Depends(require_roles("admin"))): return [{"id":x.id,"email":x.email,"role":x.role,"is_active":x.is_active} for x in db.scalars(select(User).order_by(User.id))]
+
+@app.post("/api/users/{user_id}/approve")
+def approve_submitter(user_id:int,db:Session=Depends(get_db),u=Depends(require_roles("admin"))):
+    target=db.get(User,user_id)
+    if not target: raise HTTPException(404,"User not found")
+    if target.role!="pending_submitter": raise HTTPException(400,"User is not a pending submitter")
+    target.role="submitter"
+    db.commit()
+    return {"message":"Submitter approved"}
 
 @app.get("/api/expeditions")
 def expeditions(db:Session=Depends(get_db)): return [{"id":x.id,"name":x.name,"year":x.year,"region":x.region,"start_date":x.start_date,"end_date":x.end_date,"stations":x.stations,"description":x.description} for x in db.scalars(select(Expedition).order_by(Expedition.year.desc()))]
@@ -381,7 +391,7 @@ def search(q:str="",type:str|None=None,expedition:str|None=None,year_from:int|No
     return {"items":[{**serialize_asset(a),"score":round(float(s),4)} for s,a in scored[start:start+20]],"total":len(scored),"page":page,"page_size":20,"mode":"keyword+local semantic hashing embeddings+recency"}
 @app.get("/api/search/images")
 def image_search(q:str="",db:Session=Depends(get_db)):
-    stmt = select(Asset).where(Asset.type=="photo",Asset.status=="ready")
+    stmt = select(Asset).where(Asset.status=="ready", or_(Asset.type=="photo", Asset.thumb_key.is_not(None), Asset.file_key.ilike("%.jpg"), Asset.file_key.ilike("%.jpeg"), Asset.file_key.ilike("%.png"), Asset.file_key.ilike("%.webp")))
     if q.strip():
         stmt = stmt.where(or_(Asset.title.ilike(f"%{q}%"),Asset.description.ilike(f"%{q}%")))
     items=db.scalars(stmt.order_by(Asset.created_at.desc()).limit(50)).all()

@@ -4,7 +4,7 @@ import { Heart, Share2, MessageCircle, MoreHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 
-export function FeedCard({ item, onLike, onShare }: any) {
+export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: any) {
   const [liked, setLiked] = useState(item.liked_by_me);
   const [likeCount, setLikeCount] = useState(item.like_count || 0);
   const [isLiking, setIsLiking] = useState(false);
@@ -29,10 +29,16 @@ export function FeedCard({ item, onLike, onShare }: any) {
   };
 
   const isStory = item._type === 'story';
+  const isReel = item.kind === 'reel';
   const title = isStory ? item.title : (item.title || item.caption);
   const description = isStory ? item.summary : item.description;
   const media = isStory ? (item.slides?.[0]?.asset_url || '') : (item.primary_asset?.external_url || item.video_url || '');
   const author = item.source || 'Editorial Team';
+
+  const handleMediaClick = () => {
+    if (isStory && onStoryClick) onStoryClick(item);
+    else if (isReel && onReelClick) onReelClick(item);
+  };
 
   return (
     <article className="bg-white/80 backdrop-blur-xl border border-slate-200 rounded-3xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300 group">
@@ -58,26 +64,52 @@ export function FeedCard({ item, onLike, onShare }: any) {
 
       {/* Media */}
       {media && (
-        <div className="relative w-full aspect-[4/5] bg-slate-100 overflow-hidden">
+        <div 
+          className={`relative w-full aspect-[4/5] bg-slate-100 overflow-hidden ${(isStory || isReel) ? 'cursor-pointer' : ''}`}
+          onClick={handleMediaClick}
+        >
           {item.video_url || item.mp4_key ? (
-            <video 
-              src={item.video_url || `/api/storage/${item.mp4_key}`} 
-              autoPlay 
-              muted 
-              loop 
-              playsInline
-              className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-700"
-            />
+            <div className="relative w-full h-full">
+              <video 
+                src={item.video_url || `/api/storage/${item.mp4_key}`} 
+                autoPlay 
+                muted 
+                loop 
+                playsInline
+                className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-700"
+              />
+              {isReel && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/10 transition-colors">
+                  <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white shadow-lg">
+                    <svg className="w-8 h-8 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                  </div>
+                </div>
+              )}
+            </div>
           ) : (
-            <img 
-              src={media || `/api/storage/${item.primary_asset?.file_key}`} 
-              alt={title} 
-              className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-700"
-            />
+            <div className="relative w-full h-full">
+              <img 
+                src={media || `/api/storage/${item.primary_asset?.file_key}`} 
+                alt={title} 
+                className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-700"
+              />
+              {isStory && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/20 transition-colors">
+                  <div className="px-6 py-3 rounded-full bg-white/20 backdrop-blur-md text-white font-semibold text-sm shadow-lg">
+                    Read Story
+                  </div>
+                </div>
+              )}
+            </div>
           )}
           {isStory && (
-            <div className="absolute top-4 left-4 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-white text-xs font-semibold uppercase tracking-wider border border-white/30 shadow-lg">
+            <div className="absolute top-4 left-4 px-3 py-1 bg-gradient-to-r from-amber-500 to-rose-500 rounded-full text-white text-xs font-bold uppercase tracking-wider shadow-lg">
               Story
+            </div>
+          )}
+          {isReel && !isStory && (
+            <div className="absolute top-4 left-4 px-3 py-1 bg-gradient-to-r from-sky-500 to-indigo-500 rounded-full text-white text-xs font-bold uppercase tracking-wider shadow-lg">
+              Reel
             </div>
           )}
         </div>

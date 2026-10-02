@@ -113,7 +113,7 @@ export default function DatasetDetailPage() {
           </div>
         </div>
         
-        {dataset.status === "draft" && hasFile && (
+        {["draft", "rejected"].includes(dataset.status) && hasFile && (
           <button 
             onClick={handleSubmitForReview} 
             disabled={submitting} 
