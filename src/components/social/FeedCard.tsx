@@ -4,6 +4,8 @@ import { Heart, Share2, MessageCircle, MoreHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 
+import { getMediaUrl } from '@/lib/media';
+
 export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: any) {
   const [liked, setLiked] = useState(item.liked_by_me);
   const [likeCount, setLikeCount] = useState(item.like_count || 0);
@@ -44,8 +46,14 @@ export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: a
   const isReel = item.kind === 'reel';
   const title = isStory ? item.title : (item.title || item.caption);
   const description = isStory ? item.summary : item.description;
-  const media = isStory ? (item.slides?.[0]?.asset_url || '') : (item.primary_asset?.external_url || item.video_url || '');
   const author = item.source || 'NCPOR';
+
+  const mediaUrl = isStory 
+    ? getMediaUrl(item.slides?.[0]?.thumb_key || item.slides?.[0]?.file_key || item.slides?.[0]?.asset_url) 
+    : getMediaUrl(item.poster_key || item.primary_asset?.thumb_key || item.primary_asset?.file_key || item.primary_asset?.external_url || item.media?.[0]?.thumb_key || item.media?.[0]?.file_key || item.media?.[0]?.external_url);
+
+  const videoUrl = isStory ? null : (item.video_url || (item.mp4_key ? `/api/storage/${item.mp4_key}` : null));
+  const hasMedia = !!(mediaUrl || videoUrl);
 
   const handleMediaClick = () => {
     if (isStory && onStoryClick) onStoryClick(item);
@@ -75,15 +83,16 @@ export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: a
       </div>
 
       {/* Media */}
-      {media && (
+      {hasMedia && (
         <div 
           className={`relative w-full aspect-[4/5] bg-slate-100 overflow-hidden ${(isStory || isReel) ? 'cursor-pointer' : ''}`}
           onClick={handleMediaClick}
         >
-          {item.video_url || item.mp4_key ? (
+          {videoUrl ? (
             <div className="relative w-full h-full">
               <video 
-                src={item.video_url || `/api/storage/${item.mp4_key}`} 
+                src={videoUrl}
+                poster={mediaUrl || undefined}
                 autoPlay 
                 muted 
                 loop 
@@ -101,7 +110,7 @@ export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: a
           ) : (
             <div className="relative w-full h-full">
               <img 
-                src={media || `/api/storage/${item.primary_asset?.file_key}`} 
+                src={mediaUrl || ''} 
                 alt={title} 
                 className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-700"
               />

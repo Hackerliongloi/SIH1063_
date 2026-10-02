@@ -47,6 +47,10 @@ class ImageEmbedding(Base):
 class Draft(Base):
     __tablename__="drafts"
     id: Mapped[int]=mapped_column(primary_key=True); kind: Mapped[str]=mapped_column(String(30)); title: Mapped[str]=mapped_column(String(500)); body_md: Mapped[str]=mapped_column(Text,default=""); tone: Mapped[str]=mapped_column(String(60),default="general_public"); status: Mapped[str]=mapped_column(String(30),default="draft",index=True); ai_assisted:Mapped[bool]=mapped_column(Boolean,default=False);expedition_id: Mapped[int|None]=mapped_column(ForeignKey("expeditions.id",ondelete="SET NULL"),nullable=True); scheduled_at: Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True); approved_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True);published_at: Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True); created_by: Mapped[int|None]=mapped_column(ForeignKey("users.id",ondelete="SET NULL"),nullable=True); reviewer_id: Mapped[int|None]=mapped_column(ForeignKey("users.id",ondelete="SET NULL"),nullable=True); created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now);updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now)
+    
+    # These relationships are defined as string to avoid circular imports.
+    outreach_stories = relationship("OutreachStory", primaryjoin="Draft.id==foreign(OutreachStory.source_draft_id)", viewonly=True)
+    feed_items = relationship("FeedItem", primaryjoin="Draft.id==foreign(FeedItem.origin_draft_id)", viewonly=True)
 class DraftCitation(Base):
     __tablename__="draft_citations"
     id: Mapped[int]=mapped_column(primary_key=True); draft_id: Mapped[int]=mapped_column(ForeignKey("drafts.id",ondelete="CASCADE"),index=True); claim_text: Mapped[str]=mapped_column(Text); chunk_id: Mapped[int|None]=mapped_column(ForeignKey("chunks.id",ondelete="SET NULL"),nullable=True); asset_id: Mapped[int|None]=mapped_column(ForeignKey("assets.id",ondelete="SET NULL"),nullable=True); span_text: Mapped[str]=mapped_column(Text,default=""); supported: Mapped[bool]=mapped_column(Boolean,default=False)
