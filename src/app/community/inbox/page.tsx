@@ -2,12 +2,16 @@
 import React, { useEffect, useState } from 'react';
 import { FeedCard } from '@/components/social/FeedCard';
 import { ShareDialog } from '@/components/social/ShareDialog';
+import { StoryViewer } from '@/components/social/StoryViewer';
+import { ReelViewer } from '@/components/social/ReelViewer';
 
 export default function InboxPage() {
   const [shares, setShares] = useState<any[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [shareItem, setShareItem] = useState<any | null>(null);
+  const [activeStory, setActiveStory] = useState<any | null>(null);
+  const [activeReel, setActiveReel] = useState<any | null>(null);
 
   const fetchInbox = async () => {
     try {
@@ -24,8 +28,34 @@ export default function InboxPage() {
     }
   };
 
+  const [globalReels, setGlobalReels] = useState<any[]>([]);
+  const [reelsCursor, setReelsCursor] = useState<string | null>(null);
+
+  const fetchGlobalReels = async (nextCursor?: string) => {
+    try {
+      const url = new URL('/api/social/reels', window.location.origin);
+      if (nextCursor) url.searchParams.append('cursor', nextCursor);
+      const res = await fetch(url.toString());
+      if (res.ok) {
+        const data = await res.json();
+        if (nextCursor) {
+          setGlobalReels(prev => {
+            const newItems = data.items.filter((item: any) => !prev.find(p => p.id === item.id));
+            return [...prev, ...newItems];
+          });
+        } else {
+          setGlobalReels(data.items);
+        }
+        setReelsCursor(data.next_cursor);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     fetchInbox();
+    fetchGlobalReels();
   }, []);
 
   if (loading) {
@@ -55,7 +85,12 @@ export default function InboxPage() {
               <div className="absolute -top-3 -left-3 bg-sky-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-md z-10">
                 Shared by @{share.sender_username}
               </div>
-              <FeedCard item={share.content} onShare={setShareItem} />
+              <FeedCard 
+                item={share.content} 
+                onShare={setShareItem}
+                onStoryClick={setActiveStory}
+                onReelClick={setActiveReel} 
+              />
             </div>
           ))
         )}
@@ -63,6 +98,20 @@ export default function InboxPage() {
 
       {shareItem && (
         <ShareDialog item={shareItem} onClose={() => setShareItem(null)} />
+      )}
+      
+      {activeStory && (
+        <StoryViewer story={activeStory} onClose={() => setActiveStory(null)} />
+      )}
+      
+      {activeReel && (
+        <ReelViewer 
+          initialItem={activeReel} 
+          reelsList={globalReels} 
+          onClose={() => setActiveReel(null)} 
+          onShare={setShareItem} 
+          onLoadMore={reelsCursor ? () => fetchGlobalReels(reelsCursor) : undefined}
+        />
       )}
     </div>
   );

@@ -35,7 +35,18 @@ async function forward(request: NextRequest, path: string[], method: string) {
     return response;
   }
 
-  const send = async (url: string, token?: string, body?: ArrayBuffer) => {
+  const isMultipart = request.headers.get("content-type")?.includes("multipart/form-data");
+  let body: BodyInit | null | undefined = undefined;
+  
+  if (method !== "GET" && method !== "HEAD") {
+    if (isMultipart) {
+      body = request.body;
+    } else {
+      body = await request.arrayBuffer();
+    }
+  }
+
+  const send = async (url: string, token?: string, payload?: BodyInit | null) => {
     const headers = new Headers();
     const contentType = request.headers.get("content-type");
     if (contentType) headers.set("content-type", contentType);
@@ -46,17 +57,20 @@ async function forward(request: NextRequest, path: string[], method: string) {
     const ifRange = request.headers.get("if-range");
     if (ifRange) headers.set("if-range", ifRange);
     if (token) headers.set("authorization", `Bearer ${token}`);
-    return fetch(url, { method, headers, body, cache: "no-store", redirect: "manual" });
+    
+    // In Node 18+, fetch with ReadableStream requires duplex: "half"
+    const options: RequestInit & { duplex?: string } = { method, headers, body: payload, cache: "no-store", redirect: "manual" };
+    if (payload && typeof (payload as any).getReader === 'function') {
+      options.duplex = "half";
+    }
+    return fetch(url, options);
   };
 
-  // Preserve multipart video uploads byte-for-byte while keeping request bodies replayable
-  // if access-token refresh is needed.
-  const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
   let accessToken = request.cookies.get(ACCESS_COOKIE)?.value;
   let upstream = await send(isSession ? backendUrl(["auth", "me"], "") : requestUrl, accessToken, body);
   let rotated: { access_token: string; refresh_token?: string; expires_in?: number } | undefined;
 
-  if (upstream.status === 401 && !isLogin) {
+  if (upstream.status === 401 && !isLogin && !isMultipart) {
     const refreshToken = request.cookies.get(REFRESH_COOKIE)?.value;
     if (refreshToken) {
       try {

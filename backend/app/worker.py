@@ -16,6 +16,14 @@ def process_asset(asset_id:int,key:str,suffix:str):
             for i in range(0,len(text),2500):
                 chunk_text=text[i:i+3000]
                 db.add(Chunk(asset_id=asset_id,idx=i//2500,text=chunk_text,embedding=embed(chunk_text)))
+            
+            if asset.type == "video" and not asset.thumb_key:
+                from .services import generate_video_poster, store_file
+                poster_data = generate_video_poster(data, suffix)
+                if poster_data:
+                    thumb_key = store_file(poster_data, "jpg", "image/jpeg")
+                    asset.thumb_key = thumb_key
+
             asset.status="ready";asset.error=None;db.commit()
         except Exception as e:
             asset.status="failed";asset.error=str(e)[:1000];db.commit();raise

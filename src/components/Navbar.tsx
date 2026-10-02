@@ -54,6 +54,20 @@ export default function Navbar() {
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
   const navClass = (href: string) => `rounded-md px-2.5 py-1.5 text-[13px] font-semibold transition-colors ${isActive(href) ? "bg-sky-50 text-[#12679a]" : "text-slate-700 hover:bg-slate-50 hover:text-[#12679a]"}`;
 
+  const workspaceUrl = sessionRole === "admin" || sessionRole === "editor" ? "/admin/content" : sessionRole === "reviewer" ? "/admin/editorial" : sessionRole === "submitter" ? "/submitter/datasets" : sessionRole === "pending_submitter" ? "/submitter/pending" : null;
+  const workspaceLabel = sessionRole === "submitter" || sessionRole === "pending_submitter" ? "My Dashboard" : "Portal workspace";
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      setSessionRole(null);
+      window.dispatchEvent(new Event("polar-auth-changed"));
+      window.location.href = '/login';
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   return (
     <header className="relative z-50 border-b border-slate-200 bg-white text-slate-800 shadow-sm">
       <a href="#main-content" className="skip-link">Skip to main content</a>
@@ -77,7 +91,11 @@ export default function Navbar() {
         </Link>
         <div className="hidden shrink-0 items-center gap-4 lg:flex">
           <Link href="/news" className="text-sm font-medium text-slate-600 hover:text-[#12679a]">News and updates</Link>
-          {sessionRole ? <Link href={sessionRole === "reviewer" ? "/admin/editorial" : sessionRole === "viewer" ? "/" : "/admin/content"} className="text-sm font-medium text-slate-600 hover:text-[#12679a]">Portal workspace</Link> : sessionRole === null ? <Link href="/login" className="text-sm font-medium text-slate-600 hover:text-[#12679a]">Staff sign in</Link> : null}
+          {workspaceUrl && <Link href={workspaceUrl} className="text-sm font-medium text-slate-600 hover:text-[#12679a]">{workspaceLabel}</Link>}
+          {sessionRole === null && <Link href="/login" className="text-sm font-medium text-slate-600 hover:text-[#12679a]">Sign in / Register</Link>}
+          {sessionRole !== null && sessionRole !== undefined && (
+            <button onClick={handleLogout} className="text-sm font-medium text-slate-600 hover:text-[#12679a]">Sign out</button>
+          )}
           <Link href="/explore" className="inline-flex items-center gap-2 rounded-lg bg-[#12679a] px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0d527d]">
             <Search className="h-4 w-4" />Search research
           </Link>
@@ -142,7 +160,10 @@ export default function Navbar() {
             </section>
           ))}
           <div className="grid grid-cols-2 gap-1 border-t border-slate-100 pt-2">
-            {[{ label: "Tenders", href: "/tenders" }, { label: "Careers", href: "/careers" }, { label: "News and updates", href: "/news" }, { label: "Photo gallery", href: "/gallery" }, { label: "Science stories", href: "/community?type=story" }, ...(sessionRole ? [{ label: "Portal workspace", href: sessionRole === "reviewer" ? "/admin/editorial" : sessionRole === "viewer" ? "/" : "/admin/content" }] : sessionRole === null ? [{ label: "Staff sign in", href: "/login" }] : [])].map((item) => <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className="rounded-lg px-3 py-3 text-sm text-slate-700 hover:bg-sky-50">{item.label}</Link>)}
+            {[{ label: "Tenders", href: "/tenders" }, { label: "Careers", href: "/careers" }, { label: "News and updates", href: "/news" }, { label: "Photo gallery", href: "/gallery" }, { label: "Science stories", href: "/community?type=story" }, ...(workspaceUrl ? [{ label: workspaceLabel, href: workspaceUrl }] : sessionRole === null ? [{ label: "Sign in / Register", href: "/login" }] : [])].map((item) => <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className="rounded-lg px-3 py-3 text-sm text-slate-700 hover:bg-sky-50">{item.label}</Link>)}
+            {sessionRole !== null && sessionRole !== undefined && (
+              <button onClick={() => { setMobileOpen(false); handleLogout(); }} className="rounded-lg px-3 py-3 text-left text-sm text-slate-700 hover:bg-sky-50">Sign out</button>
+            )}
           </div>
           <Link href="/explore" onClick={() => setMobileOpen(false)} className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#12679a] px-4 py-2.5 text-sm font-semibold text-white"><Search className="h-4 w-4" />Search research</Link>
         </nav>
