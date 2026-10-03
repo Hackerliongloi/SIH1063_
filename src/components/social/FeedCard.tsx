@@ -10,6 +10,7 @@ export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: a
   const [liked, setLiked] = useState(item.liked_by_me);
   const [likeCount, setLikeCount] = useState(item.like_count || 0);
   const [isLiking, setIsLiking] = useState(false);
+  const [mediaError, setMediaError] = useState(false);
 
   const handleLike = async () => {
     if (isLiking) return;
@@ -88,7 +89,12 @@ export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: a
           className={`relative w-full aspect-[4/5] bg-slate-100 overflow-hidden ${(isStory || isReel) ? 'cursor-pointer' : ''}`}
           onClick={handleMediaClick}
         >
-          {videoUrl ? (
+          {mediaError ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-100 text-slate-400">
+              <span className="text-4xl mb-3">🖼️</span>
+              <span className="text-sm font-medium px-4 text-center">Media unavailable</span>
+            </div>
+          ) : videoUrl ? (
             <div className="relative w-full h-full">
               <video 
                 src={videoUrl}
@@ -98,6 +104,10 @@ export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: a
                 loop 
                 playsInline
                 className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-700"
+                onError={() => {
+                  console.warn(`Failed to load video for feed item ${item.id}:`, videoUrl);
+                  setMediaError(true);
+                }}
               />
               {isReel && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/10 transition-colors">
@@ -113,6 +123,10 @@ export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: a
                 src={mediaUrl || ''} 
                 alt={title} 
                 className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-700"
+                onError={() => {
+                  console.warn(`Failed to load image for feed item ${item.id}:`, mediaUrl);
+                  setMediaError(true);
+                }}
               />
               {isStory && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/20 transition-colors">

@@ -410,13 +410,15 @@ def feed_transition(item_id:int,data:dict,db:Session=Depends(get_db),u=Depends(c
     x.updated_at=now()
     if x.origin_draft_id:
         draft=db.get(Draft,x.origin_draft_id)
-        if draft and draft.kind=="reel":
+        if draft and draft.kind in {"reel","post","carousel","instagram","twitter","facebook"}:
+            draft_feed_kind={"instagram":"post","twitter":"post","facebook":"post"}.get(draft.kind,draft.kind)
+            x.kind=draft_feed_kind
             draft_states={"submit":"in_review","approve":"approved","request_changes":"changes_requested","reject":"rejected","schedule":"scheduled","publish":"published","unpublish":"approved","archive":"archived"}
             draft.status=draft_states[action];draft.updated_at=now()
             if action in {"approve","request_changes","reject"}:draft.reviewer_id=u.id
             if action=="approve":draft.approved_at=now()
             if action=="publish":draft.published_at=now()
-            if action=="unpublish":draft.published_at=None;draft.scheduled_at=None
+            if action in {"unpublish","unschedule"}:draft.published_at=None;draft.scheduled_at=None
     db.commit();return item_json(x)
 @router.get("/feed/autogen/rules")
 def rules(db:Session=Depends(get_db),u=Depends(require_roles("admin"))):return [{"id":x.id,"name":x.name,"trigger":x.trigger,"template":x.template,"enabled":x.enabled,"auto_publish":x.auto_publish,"max_per_day":x.max_per_day} for x in db.scalars(select(AutogenRule))]

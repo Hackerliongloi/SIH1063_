@@ -85,6 +85,8 @@ class DraftIn(BaseModel): kind:str; title:str; body_md:str=""; tone:str="general
 class TransitionIn(BaseModel): action:str; comment:str=""; scheduled_at:str|None=None
 class EditorialCommentIn(BaseModel): comment:str=Field(min_length=1,max_length=5000)
 ASSET_TYPES={"report","dataset","publication","photo","video","activity"}; ROLES={"admin","editor","reviewer","viewer","submitter","public_user","pending_submitter"}
+SOCIAL_DRAFT_KINDS={"post","carousel","reel","instagram","twitter","facebook"}
+SOCIAL_FEED_KIND={"post":"post","carousel":"carousel","reel":"reel","instagram":"post","twitter":"post","facebook":"post"}
 def serialize_asset(a): return {"id":a.id,"type":a.type,"title":a.title,"description":a.description,"expedition_id":a.expedition_id,"expedition":a.expedition.name if a.expedition else None,"region":a.region,"station":a.station,"year":a.year,"file_key":a.file_key,"thumb_key":a.thumb_key,"external_url":a.external_url,"status":a.status,"error":a.error,"version":a.version,"metadata":a.metadata_json,"created_at":a.created_at.isoformat() if a.created_at else None}
 def serialize_draft(d): return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at,"public_story_id": d.id if d.kind == "article" else (d.outreach_stories[0].id if getattr(d, 'outreach_stories', None) and len(d.outreach_stories) > 0 else (d.feed_items[0].id if getattr(d, 'feed_items', None) and len(d.feed_items) > 0 else None))}
 def serialize_public_draft(d,db):
@@ -441,15 +443,31 @@ def transition(did:int,data:TransitionIn,db:Session=Depends(get_db),u=Depends(cu
     if data.action=="unpublish":d.published_at=None;d.scheduled_at=None
     d.updated_at=now()
     linked_states={"submit":"in_review","approve":"approved","request_changes":"changes_requested","reject":"rejected","schedule":"scheduled","publish":"published","unschedule":"approved","unpublish":"approved","archive":"archived"}
-    if d.kind=="reel":
+    # Cascade status to linked FeedItem for all feed-item-backed kinds
+    if d.kind in SOCIAL_DRAFT_KINDS:
         from .modules.feed import FeedItem
         linked_item=db.scalar(select(FeedItem).where(FeedItem.origin_draft_id==did))
-        if linked_item and linked_item.status in {"draft","changes_requested","in_review","approved","scheduled","published"}:
+        if linked_item and linked_item.status in {"draft","changes_requested","in_review","approved","scheduled","published","archived"}:
+            linked_item.kind=SOCIAL_FEED_KIND.get(d.kind,linked_item.kind)
             linked_item.status=linked_states[data.action];linked_item.updated_at=now()
             if data.action in {"approve","request_changes","reject"}:linked_item.reviewer_id=u.id
             if data.action=="approve":linked_item.approved_at=now()
-            if data.action in {"publish","schedule"}:linked_item.published_at=now() if data.action=="publish" else None
+            if data.action=="publish":linked_item.published_at=now()
+            if data.action=="schedule":
+                linked_item.scheduled_at=d.scheduled_at;linked_item.published_at=None
             if data.action in {"unpublish","unschedule"}:linked_item.published_at=None;linked_item.scheduled_at=None
+    # Cascade status to linked OutreachStory for story kind
+    elif d.kind=="story":
+        from .modules.feed import OutreachStory
+        linked_story=db.scalar(select(OutreachStory).where(OutreachStory.source_draft_id==did))
+        if linked_story and linked_story.status in {"draft","changes_requested","in_review","approved","scheduled","published","archived"}:
+            linked_story.status=linked_states[data.action];linked_story.updated_at=now()
+            if data.action in {"approve","request_changes","reject"}:linked_story.reviewer_id=u.id
+            if data.action=="approve":linked_story.approved_at=now()
+            if data.action=="publish":linked_story.published_at=now()
+            if data.action=="schedule":
+                linked_story.scheduled_at=d.scheduled_at;linked_story.published_at=None
+            if data.action in {"unpublish","unschedule"}:linked_story.published_at=None;linked_story.scheduled_at=None
     db.add(DraftComment(draft_id=did,author_id=u.id,body=data.comment,action=data.action));db.commit();db.refresh(d);return serialize_draft(d)
 @app.get("/api/editorial/calendar")
 def calendar(month:str|None=None,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):return [serialize_draft(d) for d in db.scalars(select(Draft).where(Draft.scheduled_at.is_not(None)).order_by(Draft.scheduled_at))]
@@ -462,7 +480,7 @@ def story(sid:int,db:Session=Depends(get_db)):
     return serialize_public_draft(d,db)
 @app.post("/api/generate")
 def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
-    allowed_formats={"article","twitter","instagram","facebook","post","reel","story"}
+    allowed_formats={"article","twitter","instagram","facebook","post","carousel","reel","story"}
     formats=payload.get("formats") or ["article"]
     if not isinstance(formats,list) or not formats or any(kind not in allowed_formats for kind in formats):
         raise HTTPException(422,{"detail":"formats must be a non-empty list of supported outreach formats","supported":sorted(allowed_formats)})
@@ -495,7 +513,7 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
                 body="## Slide 1 — What the sources say\n\n"+"\n\n".join(c.text[:250] for c,a in citations[:4])
             elif kind=="reel":
                 body="## Hook\n\nA short science explainer based only on the selected source material.\n\n## Voice-over / scenes\n\n"+excerpts+"\n\n## On-screen source cards\n\n"+"\n".join(f"- {a.title}" for c,a in citations[:4])
-            elif kind in {"post","instagram","twitter","facebook"}:
+            elif kind in {"post","instagram","twitter","facebook","carousel"}:
                 body="A source-grounded outreach draft for editorial review.\n\n"+excerpts+"\n\n## Sources\n\n"+"\n".join(f"- {a.title}" for c,a in citations[:4])
             else:
                 body="## Introduction\n\nThis draft uses only retrieved repository passages and requires scientific/editorial review.\n\n## Source passages\n\n"+excerpts+"\n\n## Sources\n\n"+"\n".join(f"- {a.title}" for c,a in citations[:4])
@@ -512,7 +530,7 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
                 supported=bool(chunk and span and span in chunk.text)
                 if not supported:raise ValueError("A generated claim did not pass exact source-span validation")
                 db.add(DraftCitation(draft_id=d.id,claim_text=item.get("claim_text",item.get("text","")[:350]),chunk_id=chunk.id,asset_id=item["asset_id"],span_text=span,supported=True))
-            if kind in {"story","post","reel"}:
+            if kind in {"story","post","carousel","reel","instagram","twitter","facebook"}:
                 from .modules.feed import FeedCitation, FeedItem, OutreachStory, StoryCitation, StorySlide
                 if kind=="story":
                     story=OutreachStory(title=title,summary=body[:500],status="draft",expedition_id=expedition_id,ai_assisted=True,source_draft_id=d.id,created_by=u.id)
@@ -525,7 +543,8 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
                 else:
                     first_asset=db.get(Asset,selected_citations[0]["asset_id"]) if selected_citations else None
                     media_asset=first_asset if first_asset and first_asset.type in {"photo","video"} else None
-                    item=FeedItem(kind=kind,caption=body,title=title,description="AI-assisted source-grounded draft; review before publication.",expedition_id=expedition_id,region=first_asset.region if first_asset else None,station=first_asset.station if first_asset else None,primary_asset_id=media_asset.id if media_asset else None,source="auto",origin_draft_id=d.id,status="draft",ai_assisted=True,created_by=u.id)
+                    feed_kind=SOCIAL_FEED_KIND[kind]
+                    item=FeedItem(kind=feed_kind,caption=body,title=title,description=body,expedition_id=expedition_id,region=first_asset.region if first_asset else None,station=first_asset.station if first_asset else None,primary_asset_id=media_asset.id if media_asset else None,source="auto",origin_draft_id=d.id,status="draft",ai_assisted=True,created_by=u.id)
                     db.add(item);db.flush()
                     for source in selected_citations:
                         db.add(FeedCitation(item_id=item.id,asset_id=source["asset_id"],chunk_id=source["chunk_id"],claim_text=source.get("claim_text",source.get("text","")[:350]),span_text=source.get("span_text",source.get("text","")),label=source.get("asset_title", ""),supported=True))

@@ -353,7 +353,7 @@ export default function EditorialDeskPage() {
 
                     {selectedDraft.status === "published" && selectedDraft.public_story_id && (
                       <Link
-                        href={`/community?view_id=${selectedDraft.public_story_id}&view_type=${selectedDraft.kind}`}
+                        href={`/community?view_id=${selectedDraft.public_story_id}&view_type=${["instagram", "twitter", "facebook", "post", "carousel"].includes(selectedDraft.kind) ? "post" : selectedDraft.kind}`}
                         className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium flex items-center gap-1.5"
                       >
                         View Public Story Page <ArrowRight className="w-3.5 h-3.5" />
