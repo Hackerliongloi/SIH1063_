@@ -3,13 +3,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { Upload, FileText, LoaderCircle, CheckCircle, AlertCircle, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
 export default function DatasetDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params.id as string;
   
   const [dataset, setDataset] = useState<any>(null);
@@ -88,17 +87,19 @@ export default function DatasetDetailPage() {
 
   const canUpload = ["draft", "rejected"].includes(dataset.review_status) || dataset.status === "failed";
   const hasFile = !!dataset.file_key;
-  const isApproved = dataset.review_status === "approved";
+  const imageFormats = ".jpg,.jpeg,.png,.webp,.tif,.tiff";
+  const accept = dataset.type === "photo" ? imageFormats : dataset.type === "video" ? ".mp4" : ".pdf,.docx,.csv,.nc,.nc4,.jpg,.jpeg,.png,.webp,.tif,.tiff,.mp4,.txt,.xml";
   
   return (
     <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <Link href="/submitter/datasets" className="mb-6 flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900">
-        <ArrowLeft className="h-4 w-4" /> Back to Datasets
+        <ArrowLeft className="h-4 w-4" /> Back to Submissions
       </Link>
       
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-[#143b5e]">{dataset.title}</h1>
+          <p className="mt-1 text-sm capitalize text-slate-500">{dataset.type || "dataset"}</p>
           <div className="mt-2 flex items-center gap-3">
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
               dataset.review_status === "approved" ? "bg-green-100 text-green-700" :
@@ -164,7 +165,7 @@ export default function DatasetDetailPage() {
         
         <div className="space-y-6">
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="font-semibold text-slate-900">Dataset File</h3>
+            <h3 className="font-semibold text-slate-900">Submission File</h3>
             
             {hasFile ? (
               <div className="mt-4 flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -190,10 +191,10 @@ export default function DatasetDetailPage() {
                   ) : (
                     <><Upload className="h-5 w-5" /> {hasFile ? "Replace File" : "Upload File"}</>
                   )}
-                  <input type="file" className="sr-only" onChange={handleFileUpload} disabled={uploading} accept=".pdf,.docx,.csv,.nc,.nc4,.jpg,.jpeg,.png,.webp,.tif,.tiff,.mp4,.txt,.xml" />
+                  <input type="file" className="sr-only" onChange={handleFileUpload} disabled={uploading} accept={accept} />
                 </label>
                 {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
-                <p className="mt-2 text-xs text-slate-500">Supported formats: CSV, NetCDF, PDF, Images. Max 100MB.</p>
+                <p className="mt-2 text-xs text-slate-500">Supported formats: PDF, DOCX, CSV, NetCDF, images, MP4, TXT, and XML. The portal&apos;s upload limit applies. Photo submissions require an image; video submissions require MP4.</p>
               </div>
             )}
           </div>

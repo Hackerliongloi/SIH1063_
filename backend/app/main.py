@@ -85,6 +85,8 @@ class DraftIn(BaseModel): kind:str; title:str; body_md:str=""; tone:str="general
 class TransitionIn(BaseModel): action:str; comment:str=""; scheduled_at:str|None=None
 class EditorialCommentIn(BaseModel): comment:str=Field(min_length=1,max_length=5000)
 ASSET_TYPES={"report","dataset","publication","photo","video","activity"}; ROLES={"admin","editor","reviewer","viewer","submitter","public_user","pending_submitter"}
+UPLOAD_EXTENSIONS={"pdf","docx","csv","nc","nc4","jpg","jpeg","png","webp","tif","tiff","mp4","txt","xml"}
+IMAGE_EXTENSIONS={"jpg","jpeg","png","webp","tif","tiff"}
 SOCIAL_DRAFT_KINDS={"post","carousel","reel","instagram","twitter","facebook"}
 SOCIAL_FEED_KIND={"post":"post","carousel":"carousel","reel":"reel","instagram":"post","twitter":"post","facebook":"post"}
 def serialize_asset(a): return {"id":a.id,"type":a.type,"title":a.title,"description":a.description,"expedition_id":a.expedition_id,"expedition":a.expedition.name if a.expedition else None,"region":a.region,"station":a.station,"year":a.year,"file_key":a.file_key,"thumb_key":a.thumb_key,"external_url":a.external_url,"status":a.processing_status,"review_status":a.review_status,"error":a.error,"version":a.version,"metadata":a.metadata_json,"created_at":a.created_at.isoformat() if a.created_at else None}
@@ -233,7 +235,7 @@ def assets(type:str|None=None,expedition_id:int|None=None,region:str|None=None,s
 @app.post("/api/assets",status_code=201)
 def add_asset(data:AssetIn,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     if data.type not in ASSET_TYPES: raise HTTPException(422,"Unsupported asset type")
-    a=Asset(**data.model_dump(exclude={"tags","metadata"}),metadata_json=data.metadata,created_by=u.id);db.add(a);db.flush()
+    a=Asset(**data.model_dump(exclude={"tags","metadata"}),metadata_json=data.metadata,created_by=u.id,processing_status="ready",review_status="approved");db.add(a);db.flush()
     for name in set(data.tags):
         normalized=name.strip()
         if normalized:
@@ -335,7 +337,7 @@ async def upload(file:UploadFile=File(...),title:str=Form(...),type:str=Form("re
     signatures={"pdf":data.startswith(b"%PDF-"),"jpg":data.startswith(b"\xff\xd8\xff"),"jpeg":data.startswith(b"\xff\xd8\xff"),"png":data.startswith(b"\x89PNG\r\n\x1a\n"),"webp":data.startswith(b"RIFF") and data[8:12]==b"WEBP","mp4":len(data)>12 and data[4:8]==b"ftyp","nc":data.startswith((b"CDF\x01",b"CDF\x02",b"\x89HDF\r\n\x1a\n")),"nc4":data.startswith((b"CDF\x01",b"CDF\x02",b"\x89HDF\r\n\x1a\n")),"docx":data.startswith(b"PK\x03\x04"),"csv":True,"txt":True,"tif":data.startswith((b"II*\x00",b"MM\x00*")),"tiff":data.startswith((b"II*\x00",b"MM\x00*"))}
     if not signatures.get(suffix,False):raise HTTPException(415,"File content does not match its extension")
     key=store_file(data,suffix,file.content_type or "application/octet-stream")
-    a=Asset(type=type,title=title,description=description,expedition_id=expedition_id,station=station,region=region,year=year,file_key=key,status="processing",created_by=u.id,metadata_json={"filename":file.filename,"content_type":file.content_type,"size":len(data)})
+    a=Asset(type=type,title=title,description=description,expedition_id=expedition_id,station=station,region=region,year=year,file_key=key,processing_status="processing",review_status="approved",created_by=u.id,metadata_json={"filename":file.filename,"content_type":file.content_type,"size":len(data)})
     db.add(a);db.commit();db.refresh(a)
     queued=enqueue_ingestion(a.id,key,suffix)
     if not queued:
@@ -618,7 +620,7 @@ def get_submitter_dataset(id:int,db:Session=Depends(get_db),u=Depends(require_ro
 @app.post("/api/datasets", status_code=201)
 def create_dataset_draft(data:AssetIn,db:Session=Depends(get_db),u=Depends(require_roles("submitter", "admin", "editor"))):
     if data.type not in ASSET_TYPES: raise HTTPException(422,"Unsupported asset type")
-    a=Asset(**data.model_dump(exclude={"tags","metadata"}),metadata_json=data.metadata,created_by=u.id,status="draft")
+    a=Asset(**data.model_dump(exclude={"tags","metadata"}),metadata_json=data.metadata,created_by=u.id,processing_status="ready",review_status="draft")
     db.add(a);db.flush()
     for name in set(data.tags):
         normalized=name.strip()
@@ -638,8 +640,11 @@ async def upload_dataset_file(id:int,file:UploadFile=File(...),db:Session=Depend
     if a.review_status not in {"draft", "rejected"} and a.processing_status != "failed": raise HTTPException(400, "Can only upload to draft, rejected or failed datasets")
     
     suffix=(file.filename or "").lower().rsplit(".",1)[-1] if "." in (file.filename or "") else ""
-    allowed={"pdf","docx","csv","nc","nc4","jpg","jpeg","png","webp","tif","tiff","mp4","txt", "xml"}
-    if suffix not in allowed: raise HTTPException(415,"Unsupported file extension")
+    if suffix not in UPLOAD_EXTENSIONS: raise HTTPException(415,"Unsupported file extension")
+    if a.type=="photo" and suffix not in IMAGE_EXTENSIONS:
+        raise HTTPException(415,"Photo submissions require an image file")
+    if a.type=="video" and suffix!="mp4":
+        raise HTTPException(415,"Video submissions currently require an MP4 file")
     data=await file.read(settings.max_upload_mb*1024*1024+1)
     if not data or len(data)>settings.max_upload_mb*1024*1024: raise HTTPException(413,"File empty or exceeds upload limit")
     key=store_file(data,suffix,file.content_type or "application/octet-stream")

@@ -24,9 +24,13 @@ def process_asset(asset_id:int,key:str,suffix:str):
                     thumb_key = store_file(poster_data, "jpg", "image/jpeg")
                     asset.thumb_key = thumb_key
 
-            asset.status="ready";asset.error=None;db.commit()
+            asset.processing_status="ready";asset.error=None;db.commit()
         except Exception as e:
-            asset.status="failed";asset.error=str(e)[:1000];db.commit();raise
+            db.rollback()
+            asset=db.get(Asset,asset_id)
+            if asset:
+                asset.processing_status="failed";asset.error=str(e)[:1000];db.commit()
+            raise
 
 def scheduler_tick():
     from .modules.feed import FeedItem, OutreachStory

@@ -83,7 +83,7 @@ def citation_row(data:CitationIn, story_id:int|None=None, slide_id:int|None=None
     chunk=db.get(Chunk,data.chunk_id) if db and data.chunk_id else None
     asset=db.get(Asset,data.asset_id) if db and data.asset_id else None
     if data.chunk_id and not chunk:raise HTTPException(422,"Citation chunk not found")
-    if data.asset_id and (not asset or asset.status!="ready"):raise HTTPException(422,"Citation asset is unavailable")
+    if data.asset_id and (not asset or asset.processing_status!="ready" or asset.review_status!="approved"):raise HTTPException(422,"Citation asset is unavailable")
     if chunk and data.asset_id and chunk.asset_id!=data.asset_id:raise HTTPException(422,"Citation chunk does not belong to the selected asset")
     if chunk and not data.asset_id:
         asset=db.get(Asset,chunk.asset_id)
@@ -120,7 +120,7 @@ def _write_story(story:OutreachStory,data:StoryIn,db:Session):
         if slide.kind in {"image","video"} and slide.asset_id is None:raise HTTPException(422,f"Slide {slide.position} requires an asset")
         if slide.asset_id:
             asset=db.get(Asset,slide.asset_id)
-            if not asset or asset.status!="ready":raise HTTPException(422,f"Slide asset {slide.asset_id} is unavailable")
+            if not asset or asset.processing_status!="ready" or asset.review_status!="approved":raise HTTPException(422,f"Slide asset {slide.asset_id} is unavailable")
             if slide.kind=="image" and asset.type!="photo":raise HTTPException(422,"Image slides require photo assets")
             if slide.kind=="video" and asset.type!="video":raise HTTPException(422,"Video slides require video assets")
             assets[slide.position]=asset
@@ -346,7 +346,7 @@ def create_item(data:FeedIn,db:Session=Depends(get_db),u=Depends(require_roles("
     if data.expedition_id and not db.get(Expedition,data.expedition_id):raise HTTPException(422,"Expedition not found")
     if data.primary_asset_id:
         asset=db.get(Asset,data.primary_asset_id)
-        if not asset or asset.status!="ready":raise HTTPException(422,"Primary asset is unavailable")
+        if not asset or asset.processing_status!="ready" or asset.review_status!="approved":raise HTTPException(422,"Primary asset is unavailable")
     x=FeedItem(**data.model_dump(),status="draft",created_by=u.id)
     if data.primary_asset_id:
         asset=db.get(Asset,data.primary_asset_id)
@@ -362,7 +362,7 @@ def replace_item_media(item_id:int,items:list[MediaIn],db:Session=Depends(get_db
     assets=[]
     for entry in items:
         asset=db.get(Asset,entry.asset_id)
-        if not asset or asset.status!="ready":raise HTTPException(422,f"Asset {entry.asset_id} is unavailable")
+        if not asset or asset.processing_status!="ready" or asset.review_status!="approved":raise HTTPException(422,f"Asset {entry.asset_id} is unavailable")
         if entry.kind=="image" and asset.type!="photo":raise HTTPException(422,"Image media must reference a photo asset")
         if entry.kind=="video" and asset.type!="video":raise HTTPException(422,"Video media must reference a video asset")
         assets.append(asset)
