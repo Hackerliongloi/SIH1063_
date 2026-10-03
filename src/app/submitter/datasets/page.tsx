@@ -67,13 +67,15 @@ export default function SubmitterDatasetsPage() {
                   <td className="px-6 py-4 font-medium text-slate-900">{d.title}</td>
                   <td className="px-6 py-4">
                     <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
-                      d.status === "ready" ? "bg-green-100 text-green-700" :
-                      d.status === "in_review" ? "bg-amber-100 text-amber-700" :
-                      d.status === "rejected" ? "bg-red-100 text-red-700" :
+                      d.review_status === "approved" ? "bg-green-100 text-green-700" :
+                      d.review_status === "in_review" ? "bg-amber-100 text-amber-700" :
+                      d.review_status === "rejected" ? "bg-red-100 text-red-700" :
                       "bg-slate-100 text-slate-700"
                     }`}>
-                      {d.status.replace("_", " ")}
+                      {d.review_status.replace("_", " ")}
                     </span>
+                    {d.status === "processing" && <span className="ml-2 text-xs text-blue-600">Processing...</span>}
+                    {d.status === "failed" && <span className="ml-2 text-xs text-red-600">File Error</span>}
                   </td>
                   <td className="px-6 py-4 text-slate-500">{new Date(d.created_at).toLocaleDateString()}</td>
                   <td className="px-6 py-4 text-right">

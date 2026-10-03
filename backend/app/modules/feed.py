@@ -251,7 +251,7 @@ def discovery_search(q:str="",content_type:str|None=None,region:str|None=None,ex
         results.append({"kind":kind,"score":round(rank,5),"title":title,"record":record})
 
     if not content_type or content_type in {"report","dataset","publication","photo","video","activity"}:
-        query=select(Asset).where(Asset.status=="ready")
+        query=select(Asset).where((Asset.processing_status=="ready") & (Asset.review_status=="approved"))
         if content_type:query=query.where(Asset.type==content_type)
         if region:query=query.where(Asset.region.ilike(f"%{region}%"))
         if station:query=query.where(Asset.station.ilike(f"%{station}%"))

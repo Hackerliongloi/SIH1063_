@@ -96,3 +96,28 @@ def enqueue_ingestion(asset_id:int,key:str,suffix:str)->bool:
         return True
     except Exception as e:
         logging.info("RQ unavailable; running ingestion inline: %s",e);return False
+
+def send_activation_email(to_email: str, token: str) -> bool:
+    if not settings.smtp_host:
+        logging.error("SMTP configuration is missing. Cannot deliver activation emails.")
+        return False
+        
+    import smtplib
+    from email.message import EmailMessage
+    
+    msg = EmailMessage()
+    msg['Subject'] = "Activate your Polar Portal account"
+    msg['From'] = settings.smtp_from_email
+    msg['To'] = to_email
+    msg.set_content(f"Please activate your account by clicking the following link:\n\nhttp://localhost:3000/activate?token={token}")
+    
+    try:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
+            server.starttls()
+            if settings.smtp_user and settings.smtp_password:
+                server.login(settings.smtp_user, settings.smtp_password)
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        logging.error("SMTP delivery failed: %s", e)
+        return False

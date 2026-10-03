@@ -86,8 +86,9 @@ export default function DatasetDetailPage() {
   if (loading) return <div className="flex justify-center py-12"><LoaderCircle className="h-8 w-8 animate-spin text-[#12679a]" /></div>;
   if (error && !dataset) return <div className="p-8 text-center text-red-700">{error}</div>;
 
-  const canUpload = ["draft", "rejected", "failed"].includes(dataset.status);
+  const canUpload = ["draft", "rejected"].includes(dataset.review_status) || dataset.status === "failed";
   const hasFile = !!dataset.file_key;
+  const isApproved = dataset.review_status === "approved";
   
   return (
     <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
@@ -100,20 +101,22 @@ export default function DatasetDetailPage() {
           <h1 className="text-2xl font-bold text-[#143b5e]">{dataset.title}</h1>
           <div className="mt-2 flex items-center gap-3">
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-              dataset.status === "ready" ? "bg-green-100 text-green-700" :
-              dataset.status === "in_review" ? "bg-amber-100 text-amber-700" :
-              dataset.status === "rejected" ? "bg-red-100 text-red-700" :
+              dataset.review_status === "approved" ? "bg-green-100 text-green-700" :
+              dataset.review_status === "in_review" ? "bg-amber-100 text-amber-700" :
+              dataset.review_status === "rejected" ? "bg-red-100 text-red-700" :
               "bg-slate-100 text-slate-700"
             }`}>
-              {dataset.status === "ready" && <CheckCircle className="h-3.5 w-3.5" />}
-              {dataset.status === "rejected" && <AlertCircle className="h-3.5 w-3.5" />}
-              {dataset.status.replace("_", " ")}
+              {dataset.review_status === "approved" && <CheckCircle className="h-3.5 w-3.5" />}
+              {dataset.review_status === "rejected" && <AlertCircle className="h-3.5 w-3.5" />}
+              {dataset.review_status.replace("_", " ")}
             </span>
             <span className="text-sm text-slate-500">ID: {dataset.id}</span>
+            {dataset.status === "processing" && <span className="text-sm text-blue-600">Processing File...</span>}
+            {dataset.status === "failed" && <span className="text-sm text-red-600">File Processing Failed</span>}
           </div>
         </div>
         
-        {["draft", "rejected"].includes(dataset.status) && hasFile && (
+        {["draft", "rejected"].includes(dataset.review_status) && hasFile && (
           <button 
             onClick={handleSubmitForReview} 
             disabled={submitting} 
@@ -147,7 +150,7 @@ export default function DatasetDetailPage() {
             </div>
           </div>
           
-          {dataset.status === "rejected" && (
+          {dataset.review_status === "rejected" && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-6 shadow-sm">
               <h3 className="flex items-center gap-2 font-semibold text-red-900">
                 <AlertCircle className="h-5 w-5" /> Revision Required

@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 
-type AssetRecord = { id: string | number; title: string; type?: string; region?: string; year?: number | string; version?: number | string; status?: string };
+type AssetRecord = { id: string | number; title: string; type?: string; region?: string; year?: number | string; version?: number | string; status?: string; review_status?: string; };
 type ExpeditionRecord = { id: string | number; name: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -55,10 +55,10 @@ export default function AdminContentPage() {
     setLoadError(null);
     try {
       const [assetsRes, expRes] = await Promise.all([
-        Promise.all([api.getLiveAssets("ready"), api.getLiveAssets("processing"), api.getLiveAssets("failed"), api.getLiveAssets("in_review")]),
+        api.getLiveAssets("", ""),
         api.getLiveExpeditions(),
       ]);
-      setAssets(assetsRes.flatMap((items) => responseList(items, (item): item is AssetRecord => isRecord(item) && (typeof item.id === "string" || typeof item.id === "number") && typeof item.title === "string")));
+      setAssets(responseList(assetsRes, (item): item is AssetRecord => isRecord(item) && (typeof item.id === "string" || typeof item.id === "number") && typeof item.title === "string"));
       setExpeditions(responseList(expRes, (item): item is ExpeditionRecord => isRecord(item) && (typeof item.id === "string" || typeof item.id === "number") && typeof item.name === "string"));
     } catch (err) {
       console.error("Failed to load content data", err);
@@ -76,9 +76,15 @@ export default function AdminContentPage() {
     ? "border-emerald-200 bg-emerald-50 text-emerald-800"
     : status === "processing"
       ? "border-amber-200 bg-amber-50 text-amber-800"
-      : status === "in_review"
-        ? "border-purple-200 bg-purple-50 text-purple-800"
-        : "border-rose-200 bg-rose-50 text-rose-800";
+      : "border-rose-200 bg-rose-50 text-rose-800";
+      
+  const reviewBadge = (status?: string) => status === "approved"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+    : status === "in_review"
+      ? "border-purple-200 bg-purple-50 text-purple-800"
+      : status === "rejected"
+        ? "border-rose-200 bg-rose-50 text-rose-800"
+        : "border-slate-200 bg-slate-50 text-slate-800";
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadData(); }, 0);
@@ -232,13 +238,16 @@ export default function AdminContentPage() {
                       v{a.version}
                     </span>
                   </td>
-                  <td className="px-5 py-4">
-                    <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusBadge(a.status)}`}>
-                      {a.status}
+                  <td className="px-5 py-4 space-y-1">
+                    <span className={`block w-max rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${reviewBadge(a.review_status)}`}>
+                      Review: {a.review_status?.replace("_", " ") || "draft"}
+                    </span>
+                    <span className={`block w-max rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusBadge(a.status)}`}>
+                      File: {a.status}
                     </span>
                   </td>
                   <td className="space-x-2 px-5 py-4 text-right text-xs font-semibold">
-                    {a.status === "in_review" && (
+                    {a.review_status === "in_review" && (
                       <>
                         <button onClick={() => handleTransition(a.id, 'approve')} className="text-emerald-700 hover:underline">Approve</button>
                         <span>•</span>
