@@ -253,6 +253,9 @@ export const api = {
     if (reviewStatus !== undefined) q.append("review_status", reviewStatus);
     return listFromResponse(await fetchFromAPI(`/assets?${q.toString()}`, undefined, false));
   },
+  getGenerateSources: async () => {
+    return listFromResponse(await fetchFromAPI("/generate/sources"));
+  },
 
   // Grounded Generation
   generateContent: async (payload: {

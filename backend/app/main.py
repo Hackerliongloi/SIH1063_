@@ -580,6 +580,24 @@ def story(sid:int,db:Session=Depends(get_db)):
     d=db.get(Draft,sid)
     if not d or d.kind!="article" or d.status!="published":raise HTTPException(404,"Story not found")
     return serialize_public_draft(d,db)
+@app.get("/api/generate/sources")
+def generate_sources(db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
+    rows=db.execute(
+        select(Asset,func.count(Chunk.id).label("chunk_count"))
+        .outerjoin(Chunk,Chunk.asset_id==Asset.id)
+        .where(
+            Asset.processing_status=="ready",
+            Asset.review_status.in_({"approved", "in_review", "draft"}),
+        )
+        .group_by(Asset.id)
+        .order_by(Asset.created_at.desc())
+        .limit(100)
+    ).all()
+    return [{"id":asset.id,"title":asset.title,"type":asset.type,"region":asset.region,
+             "year":asset.year,"expedition_id":asset.expedition_id,
+             "review_status":asset.review_status,"chunk_count":chunk_count}
+            for asset,chunk_count in rows]
+
 @app.post("/api/generate")
 def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     allowed_formats={"article","twitter","instagram","facebook","post","carousel","reel","story"}
@@ -593,19 +611,27 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
         ids=[int(asset_id) for asset_id in raw_ids]
         expedition_id=int(payload["expedition_id"]) if payload.get("expedition_id") not in (None,"") else None
     except (TypeError,ValueError):raise HTTPException(422,"asset_ids and expedition_id must contain valid integer IDs")
-    stmt=select(Chunk,Asset).join(Asset,Chunk.asset_id==Asset.id).where((Asset.processing_status=="ready") & (Asset.review_status=="approved"))
+    # Editors may prepare internal, citation-grounded drafts from ready material
+    # that is still in draft/review. Only approved assets are public; generation
+    # remains restricted to staff and creates an editorial draft requiring review.
+    stmt=select(Chunk,Asset).join(Asset,Chunk.asset_id==Asset.id).where(
+        Asset.processing_status=="ready",
+        Asset.review_status.in_({"approved", "in_review", "draft"}),
+    )
     if ids:stmt=stmt.where(Asset.id.in_(ids))
     elif expedition_id:stmt=stmt.where(Asset.expedition_id==expedition_id)
     elif payload.get("theme"):stmt=stmt.where(or_(Asset.title.ilike(f"%{payload['theme']}%"),Chunk.text.ilike(f"%{payload['theme']}%")))
     else:raise HTTPException(422,"Provide asset_ids, expedition_id, or theme")
-    rows=db.execute(stmt.limit(12)).all()
-    if not rows:raise HTTPException(422,"No indexed source chunks found; ingest source documents first")
+    rows=db.execute(stmt.order_by(Asset.id,Chunk.idx,Chunk.id).limit(12)).all()
+    if not rows:raise HTTPException(422,"No indexed text chunks found for the selected sources. Confirm indexing is complete and the records contain extractable text; draft and in-review records are supported.")
     citations=[]; snippets=[]
     for i,(c,a) in enumerate(rows,1):
         excerpt=c.text[:700];snippets.append(f"[{i}] {excerpt}");citations.append((c,a))
     citation_rows=[{"chunk_id":c.id,"asset_id":a.id,"asset_title":a.title,"text":c.text} for c,a in citations]
     if settings.llm_provider=="openrouter" and not settings.model_api_key:
-        raise HTTPException(503,"OpenRouter is selected but MODEL_API_KEY is not configured")
+        raise HTTPException(503,"OpenRouter is selected but MODEL_API_KEY is not configured in the API container. Set it in .env and recreate the API container.")
+    if settings.llm_provider=="openrouter" and (not settings.model_name or settings.model_name=="local-fake"):
+        raise HTTPException(503,"OpenRouter is selected but MODEL_NAME is not a valid OpenRouter model identifier")
     output=[];linked_content={}
     try:
         for kind in formats:

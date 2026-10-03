@@ -18,7 +18,7 @@ import {
 import { TwitterIcon, InstagramIcon, FacebookIcon } from "@/components/SocialIcons";
 import { api } from "@/lib/api";
 
-type StudioAsset = { id: string | number; title: string; type?: string; region?: string; year?: string | number };
+type StudioAsset = { id: string | number; title: string; type?: string; region?: string; year?: string | number; review_status?: string; chunk_count?: number };
 type StudioExpedition = { id: string | number; name: string };
 type StudioCitation = { chunk_id?: string | number; claim_text?: string; span_text?: string };
 type GeneratedDraft = { id: string | number; kind: string; tone?: string; title: string; body_md: string; citations?: StudioCitation[] };
@@ -36,9 +36,7 @@ function GenerateStudioContent() {
   const [generationTheme, setGenerationTheme] = useState("");
   const [selectedTone, setSelectedTone] = useState("general_public");
   const [selectedFormats, setSelectedFormats] = useState<string[]>([
-    "article",
-    "twitter",
-    "instagram",
+    "post",
   ]);
 
   const [generating, setGenerating] = useState(false);
@@ -52,7 +50,7 @@ function GenerateStudioContent() {
     async function loadData() {
       try {
         const [assetsRes, expRes] = await Promise.all([
-          api.getLiveAssets(),
+          api.getGenerateSources(),
           api.getLiveExpeditions(),
         ]);
         setAssets(Array.isArray(assetsRes) ? assetsRes as StudioAsset[] : []);
@@ -163,6 +161,7 @@ function GenerateStudioContent() {
               <label className="text-xs font-mono text-slate-600 block">Output Formats:</label>
               <div className="grid grid-cols-2 gap-2">
                 {[
+                  { id: "post", label: "Text Post", icon: FileText },
                   { id: "article", label: "Outreach Article", icon: FileText },
                   { id: "twitter", label: "Twitter Thread", icon: TwitterIcon },
                   { id: "instagram", label: "Instagram Post", icon: InstagramIcon },
@@ -248,7 +247,7 @@ function GenerateStudioContent() {
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-bold text-[#143b5e] uppercase tracking-wider font-mono flex items-center gap-2">
                 <Layers className="w-4 h-4 text-teal-700" />
-                2. Select Grounding Assets ({selectedAssetIds.length})
+                2. Select Ready Source Assets ({selectedAssetIds.length})
               </h2>
               {selectedAssetIds.length > 0 && (
                 <button
@@ -262,7 +261,7 @@ function GenerateStudioContent() {
             </div>
 
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Only paragraphs grounded in chunks from these assets will be generated:
+              Ready reports and datasets in draft, review, or approved status can be used. Every draft is citation checked and still needs editorial approval. Source text is sent to the configured OpenRouter model.
             </p>
 
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -287,7 +286,7 @@ function GenerateStudioContent() {
                     />
                     <div className="space-y-0.5 flex-1">
                       <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
-                        <span className="uppercase text-[#12679a]">{a.type}</span>
+                        <span className="uppercase text-[#12679a]">{a.type} · {a.review_status} · {a.chunk_count ?? 0} chunks</span>
                         <span>{a.region} • {a.year}</span>
                       </div>
                       <p className="font-semibold line-clamp-1">{a.title}</p>
