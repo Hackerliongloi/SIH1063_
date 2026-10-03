@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from ..core.db import get_db
 from ..core.security import current_user, require_roles
-from ..models import User, PublicProfile, SocialLike, SocialShare, now
+from ..models import User, PublicProfile, SocialLike, SocialShare, now, Draft, DraftCitation, Asset
 from .feed import FeedItem, OutreachStory, item_json, story_json, _story_expired
 
 router = APIRouter(tags=["social"])
@@ -207,13 +207,21 @@ def get_inbox(cursor: str | None = None, limit: int = 20, db: Session = Depends(
         
     return {"items": results, "next_cursor": next_cursor}
 
+def article_json(d, db):
+    sources = []
+    for citation in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==d.id)):
+        asset = db.get(Asset, citation.asset_id) if citation.asset_id else None
+        sources.append({"asset_id":citation.asset_id,"chunk_id":citation.chunk_id,"title":asset.title if asset else None,"url":asset.external_url if asset else None,"claim_text":citation.claim_text,"span_text":citation.span_text,"supported":citation.supported})
+    return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at,"public_story_id": d.id, "sources": sources}
+
 @router.get("/feed")
 def mixed_feed(cursor: str | None = None, limit: int = 20, db: Session = Depends(get_db), u = Depends(current_user)):
-    # Combine feed items and stories
+    # Combine feed items, stories, and articles
     limit = max(1, min(limit, 50))
     
     feed_q = select(FeedItem).where(FeedItem.status == "published")
     story_q = select(OutreachStory).where(OutreachStory.status == "published")
+    article_q = select(Draft).where(and_(Draft.kind == "article", Draft.status == "published"))
     
     if cursor:
         try:
@@ -221,8 +229,6 @@ def mixed_feed(cursor: str | None = None, limit: int = 20, db: Session = Depends
             dt = datetime.fromisoformat(ts_str)
             item_id = int(id_str)
             
-            # This is an approximation since we can't easily UNION completely different schemas in SQLAlchemy ORM.
-            # We'll pull a bit more from each and merge-sort.
             feed_q = feed_q.where(
                 or_(
                     FeedItem.published_at < dt,
@@ -235,12 +241,19 @@ def mixed_feed(cursor: str | None = None, limit: int = 20, db: Session = Depends
                     and_(OutreachStory.published_at == dt, type_str == "story", OutreachStory.id < item_id)
                 )
             )
+            article_q = article_q.where(
+                or_(
+                    Draft.published_at < dt,
+                    and_(Draft.published_at == dt, type_str == "article", Draft.id < item_id)
+                )
+            )
         except Exception:
             raise HTTPException(400, "Invalid cursor")
             
-    # Fetch from both
+    # Fetch from all three
     feed_items = db.scalars(feed_q.order_by(FeedItem.published_at.desc(), FeedItem.id.desc()).limit(limit + 1)).all()
     stories = db.scalars(story_q.order_by(OutreachStory.published_at.desc(), OutreachStory.id.desc()).limit(limit + 1)).all()
+    articles = db.scalars(article_q.order_by(Draft.published_at.desc(), Draft.id.desc()).limit(limit + 1)).all()
     
     # Filter expired stories
     stories = [s for s in stories if not _story_expired(s)]
@@ -261,6 +274,13 @@ def mixed_feed(cursor: str | None = None, limit: int = 20, db: Session = Depends
             "id": story.id,
             "data": story
         })
+    for article in articles:
+        combined.append({
+            "ts": article.published_at or article.created_at,
+            "type": "article",
+            "id": article.id,
+            "data": article
+        })
         
     # Sort descending
     combined.sort(key=lambda x: (x["ts"], -x["id"]), reverse=True)
@@ -273,6 +293,9 @@ def mixed_feed(cursor: str | None = None, limit: int = 20, db: Session = Depends
         if item["type"] == "feed_item":
             res = item_json(item["data"])
             res["_type"] = "feed_item"
+        elif item["type"] == "article":
+            res = article_json(item["data"], db)
+            res["_type"] = "article"
         else:
             res = story_json(item["data"])
             res["_type"] = "story"
@@ -281,8 +304,10 @@ def mixed_feed(cursor: str | None = None, limit: int = 20, db: Session = Depends
         if u:
             if item["type"] == "feed_item":
                 liked = db.scalar(select(SocialLike).where(SocialLike.user_id == u.id, SocialLike.feed_item_id == item["id"])) is not None
-            else:
+            elif item["type"] == "story":
                 liked = db.scalar(select(SocialLike).where(SocialLike.user_id == u.id, SocialLike.story_id == item["id"])) is not None
+            else:
+                liked = False
             res["liked_by_me"] = liked
         else:
             res["liked_by_me"] = False

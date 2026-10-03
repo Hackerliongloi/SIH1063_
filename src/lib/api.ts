@@ -246,7 +246,12 @@ export const api = {
       total: response?.total ?? listFromResponse(response).length,
     };
   },
-  getLiveAssets: async (status = "ready") => listFromResponse(await fetchFromAPI(`/assets?status=${encodeURIComponent(status)}`, undefined, false)),
+  getLiveAssets: async (processingStatus?: string, reviewStatus?: string) => {
+    const q = new URLSearchParams();
+    if (processingStatus !== undefined) q.append("processing_status", processingStatus);
+    if (reviewStatus !== undefined) q.append("review_status", reviewStatus);
+    return listFromResponse(await fetchFromAPI(`/assets?${q.toString()}`, undefined, false));
+  },
 
   // Grounded Generation
   generateContent: async (payload: {

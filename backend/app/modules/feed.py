@@ -83,7 +83,7 @@ def citation_row(data:CitationIn, story_id:int|None=None, slide_id:int|None=None
     chunk=db.get(Chunk,data.chunk_id) if db and data.chunk_id else None
     asset=db.get(Asset,data.asset_id) if db and data.asset_id else None
     if data.chunk_id and not chunk:raise HTTPException(422,"Citation chunk not found")
-    if data.asset_id and (not asset or asset.status!="ready"):raise HTTPException(422,"Citation asset is unavailable")
+    if data.asset_id and (not asset or asset.processing_status!="ready" or asset.review_status!="approved"):raise HTTPException(422,"Citation asset is unavailable")
     if chunk and data.asset_id and chunk.asset_id!=data.asset_id:raise HTTPException(422,"Citation chunk does not belong to the selected asset")
     if chunk and not data.asset_id:
         asset=db.get(Asset,chunk.asset_id)
@@ -120,7 +120,7 @@ def _write_story(story:OutreachStory,data:StoryIn,db:Session):
         if slide.kind in {"image","video"} and slide.asset_id is None:raise HTTPException(422,f"Slide {slide.position} requires an asset")
         if slide.asset_id:
             asset=db.get(Asset,slide.asset_id)
-            if not asset or asset.status!="ready":raise HTTPException(422,f"Slide asset {slide.asset_id} is unavailable")
+            if not asset or asset.processing_status!="ready" or asset.review_status!="approved":raise HTTPException(422,f"Slide asset {slide.asset_id} is unavailable")
             if slide.kind=="image" and asset.type!="photo":raise HTTPException(422,"Image slides require photo assets")
             if slide.kind=="video" and asset.type!="video":raise HTTPException(422,"Video slides require video assets")
             assets[slide.position]=asset
@@ -251,7 +251,7 @@ def discovery_search(q:str="",content_type:str|None=None,region:str|None=None,ex
         results.append({"kind":kind,"score":round(rank,5),"title":title,"record":record})
 
     if not content_type or content_type in {"report","dataset","publication","photo","video","activity"}:
-        query=select(Asset).where(Asset.status=="ready")
+        query=select(Asset).where((Asset.processing_status=="ready") & (Asset.review_status=="approved"))
         if content_type:query=query.where(Asset.type==content_type)
         if region:query=query.where(Asset.region.ilike(f"%{region}%"))
         if station:query=query.where(Asset.station.ilike(f"%{station}%"))
@@ -346,7 +346,7 @@ def create_item(data:FeedIn,db:Session=Depends(get_db),u=Depends(require_roles("
     if data.expedition_id and not db.get(Expedition,data.expedition_id):raise HTTPException(422,"Expedition not found")
     if data.primary_asset_id:
         asset=db.get(Asset,data.primary_asset_id)
-        if not asset or asset.status!="ready":raise HTTPException(422,"Primary asset is unavailable")
+        if not asset or asset.processing_status!="ready" or asset.review_status!="approved":raise HTTPException(422,"Primary asset is unavailable")
     x=FeedItem(**data.model_dump(),status="draft",created_by=u.id)
     if data.primary_asset_id:
         asset=db.get(Asset,data.primary_asset_id)
@@ -362,7 +362,7 @@ def replace_item_media(item_id:int,items:list[MediaIn],db:Session=Depends(get_db
     assets=[]
     for entry in items:
         asset=db.get(Asset,entry.asset_id)
-        if not asset or asset.status!="ready":raise HTTPException(422,f"Asset {entry.asset_id} is unavailable")
+        if not asset or asset.processing_status!="ready" or asset.review_status!="approved":raise HTTPException(422,f"Asset {entry.asset_id} is unavailable")
         if entry.kind=="image" and asset.type!="photo":raise HTTPException(422,"Image media must reference a photo asset")
         if entry.kind=="video" and asset.type!="video":raise HTTPException(422,"Video media must reference a video asset")
         assets.append(asset)
@@ -410,13 +410,15 @@ def feed_transition(item_id:int,data:dict,db:Session=Depends(get_db),u=Depends(c
     x.updated_at=now()
     if x.origin_draft_id:
         draft=db.get(Draft,x.origin_draft_id)
-        if draft and draft.kind=="reel":
+        if draft and draft.kind in {"reel","post","carousel","instagram","twitter","facebook"}:
+            draft_feed_kind={"instagram":"post","twitter":"post","facebook":"post"}.get(draft.kind,draft.kind)
+            x.kind=draft_feed_kind
             draft_states={"submit":"in_review","approve":"approved","request_changes":"changes_requested","reject":"rejected","schedule":"scheduled","publish":"published","unpublish":"approved","archive":"archived"}
             draft.status=draft_states[action];draft.updated_at=now()
             if action in {"approve","request_changes","reject"}:draft.reviewer_id=u.id
             if action=="approve":draft.approved_at=now()
             if action=="publish":draft.published_at=now()
-            if action=="unpublish":draft.published_at=None;draft.scheduled_at=None
+            if action in {"unpublish","unschedule"}:draft.published_at=None;draft.scheduled_at=None
     db.commit();return item_json(x)
 @router.get("/feed/autogen/rules")
 def rules(db:Session=Depends(get_db),u=Depends(require_roles("admin"))):return [{"id":x.id,"name":x.name,"trigger":x.trigger,"template":x.template,"enabled":x.enabled,"auto_publish":x.auto_publish,"max_per_day":x.max_per_day} for x in db.scalars(select(AutogenRule))]

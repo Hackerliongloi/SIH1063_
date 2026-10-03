@@ -19,7 +19,7 @@ import { TwitterIcon, InstagramIcon, FacebookIcon } from "@/components/SocialIco
 import { api } from "@/lib/api";
 
 type DraftComment = { id?: string | number; author_name?: string; body: string; created_at?: string };
-type DraftRecord = { id: string | number; kind: string; title: string; body_md?: string; tone?: string; status: string; created_by?: string | number; citations?: unknown[]; comments?: DraftComment[]; scheduled_at?: string | null; expedition_id?: string | number | null };
+type DraftRecord = { id: string | number; kind: string; title: string; body_md?: string; tone?: string; status: string; created_by?: string | number; citations?: unknown[]; comments?: DraftComment[]; scheduled_at?: string | null; expedition_id?: string | number | null; public_story_id?: number | null };
 type CalendarRecord = DraftRecord;
 
 export default function EditorialDeskPage() {
@@ -351,9 +351,9 @@ export default function EditorialDeskPage() {
                       </>
                     )}
 
-                    {selectedDraft.status === "published" && (
+                    {selectedDraft.status === "published" && selectedDraft.public_story_id && (
                       <Link
-                        href={`/community?story_id=${selectedDraft.id}`}
+                        href={`/community?view_id=${selectedDraft.public_story_id}&view_type=${["instagram", "twitter", "facebook", "post", "carousel"].includes(selectedDraft.kind) ? "post" : selectedDraft.kind}`}
                         className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium flex items-center gap-1.5"
                       >
                         View Public Story Page <ArrowRight className="w-3.5 h-3.5" />

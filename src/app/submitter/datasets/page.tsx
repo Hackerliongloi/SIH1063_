@@ -32,11 +32,11 @@ export default function SubmitterDatasetsPage() {
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
       <div className="flex items-center justify-between pb-6">
         <div>
-          <h1 className="text-2xl font-bold text-[#143b5e]">My Datasets</h1>
-          <p className="mt-1 text-sm text-slate-500">Manage your dataset submissions and track review status.</p>
+          <h1 className="text-2xl font-bold text-[#143b5e]">My Submissions</h1>
+          <p className="mt-1 text-sm text-slate-500">Manage your datasets, reports, publications, images, videos, and research activities.</p>
         </div>
         <Link href="/submitter/datasets/new" className="inline-flex items-center gap-2 rounded-lg bg-[#12679a] px-4 py-2 text-sm font-bold text-white hover:bg-[#0d527d]">
-          <Plus className="h-4 w-4" /> New Dataset
+          <Plus className="h-4 w-4" /> New Submission
         </Link>
       </div>
 
@@ -48,7 +48,7 @@ export default function SubmitterDatasetsPage() {
         <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-12 text-center">
           <FileText className="mx-auto h-12 w-12 text-slate-300" />
           <h3 className="mt-4 text-sm font-semibold text-slate-900">No datasets</h3>
-          <p className="mt-2 text-sm text-slate-500">Get started by creating a new dataset submission.</p>
+          <p className="mt-2 text-sm text-slate-500">Get started by creating a dataset, report, publication, image, video, or activity submission.</p>
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -64,16 +64,18 @@ export default function SubmitterDatasetsPage() {
             <tbody className="divide-y divide-slate-200">
               {datasets.map(d => (
                 <tr key={d.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4 font-medium text-slate-900">{d.title}</td>
+                  <td className="px-6 py-4 font-medium text-slate-900">{d.title}<span className="ml-2 rounded bg-slate-100 px-2 py-1 text-xs font-normal text-slate-600">{d.type || "dataset"}</span></td>
                   <td className="px-6 py-4">
                     <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
-                      d.status === "ready" ? "bg-green-100 text-green-700" :
-                      d.status === "in_review" ? "bg-amber-100 text-amber-700" :
-                      d.status === "rejected" ? "bg-red-100 text-red-700" :
+                      d.review_status === "approved" ? "bg-green-100 text-green-700" :
+                      d.review_status === "in_review" ? "bg-amber-100 text-amber-700" :
+                      d.review_status === "rejected" ? "bg-red-100 text-red-700" :
                       "bg-slate-100 text-slate-700"
                     }`}>
-                      {d.status.replace("_", " ")}
+                      {d.review_status.replace("_", " ")}
                     </span>
+                    {d.status === "processing" && <span className="ml-2 text-xs text-blue-600">Processing...</span>}
+                    {d.status === "failed" && <span className="ml-2 text-xs text-red-600">File Error</span>}
                   </td>
                   <td className="px-6 py-4 text-slate-500">{new Date(d.created_at).toLocaleDateString()}</td>
                   <td className="px-6 py-4 text-right">

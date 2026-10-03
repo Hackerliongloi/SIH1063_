@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     model_path: str = ""
     admin_email: str = "admin@polar.local"
     admin_password: str = "ChangeMe-Local-Only-123!"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "noreply@polar.local"
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 @lru_cache

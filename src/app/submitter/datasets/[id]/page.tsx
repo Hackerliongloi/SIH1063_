@@ -3,13 +3,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { Upload, FileText, LoaderCircle, CheckCircle, AlertCircle, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
 export default function DatasetDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params.id as string;
   
   const [dataset, setDataset] = useState<any>(null);
@@ -86,34 +85,39 @@ export default function DatasetDetailPage() {
   if (loading) return <div className="flex justify-center py-12"><LoaderCircle className="h-8 w-8 animate-spin text-[#12679a]" /></div>;
   if (error && !dataset) return <div className="p-8 text-center text-red-700">{error}</div>;
 
-  const canUpload = ["draft", "rejected", "failed"].includes(dataset.status);
+  const canUpload = ["draft", "rejected"].includes(dataset.review_status) || dataset.status === "failed";
   const hasFile = !!dataset.file_key;
+  const imageFormats = ".jpg,.jpeg,.png,.webp,.tif,.tiff";
+  const accept = dataset.type === "photo" ? imageFormats : dataset.type === "video" ? ".mp4" : ".pdf,.docx,.csv,.nc,.nc4,.jpg,.jpeg,.png,.webp,.tif,.tiff,.mp4,.txt,.xml";
   
   return (
     <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <Link href="/submitter/datasets" className="mb-6 flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900">
-        <ArrowLeft className="h-4 w-4" /> Back to Datasets
+        <ArrowLeft className="h-4 w-4" /> Back to Submissions
       </Link>
       
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-[#143b5e]">{dataset.title}</h1>
+          <p className="mt-1 text-sm capitalize text-slate-500">{dataset.type || "dataset"}</p>
           <div className="mt-2 flex items-center gap-3">
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-              dataset.status === "ready" ? "bg-green-100 text-green-700" :
-              dataset.status === "in_review" ? "bg-amber-100 text-amber-700" :
-              dataset.status === "rejected" ? "bg-red-100 text-red-700" :
+              dataset.review_status === "approved" ? "bg-green-100 text-green-700" :
+              dataset.review_status === "in_review" ? "bg-amber-100 text-amber-700" :
+              dataset.review_status === "rejected" ? "bg-red-100 text-red-700" :
               "bg-slate-100 text-slate-700"
             }`}>
-              {dataset.status === "ready" && <CheckCircle className="h-3.5 w-3.5" />}
-              {dataset.status === "rejected" && <AlertCircle className="h-3.5 w-3.5" />}
-              {dataset.status.replace("_", " ")}
+              {dataset.review_status === "approved" && <CheckCircle className="h-3.5 w-3.5" />}
+              {dataset.review_status === "rejected" && <AlertCircle className="h-3.5 w-3.5" />}
+              {dataset.review_status.replace("_", " ")}
             </span>
             <span className="text-sm text-slate-500">ID: {dataset.id}</span>
+            {dataset.status === "processing" && <span className="text-sm text-blue-600">Processing File...</span>}
+            {dataset.status === "failed" && <span className="text-sm text-red-600">File Processing Failed</span>}
           </div>
         </div>
         
-        {["draft", "rejected"].includes(dataset.status) && hasFile && (
+        {["draft", "rejected"].includes(dataset.review_status) && hasFile && (
           <button 
             onClick={handleSubmitForReview} 
             disabled={submitting} 
@@ -147,7 +151,7 @@ export default function DatasetDetailPage() {
             </div>
           </div>
           
-          {dataset.status === "rejected" && (
+          {dataset.review_status === "rejected" && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-6 shadow-sm">
               <h3 className="flex items-center gap-2 font-semibold text-red-900">
                 <AlertCircle className="h-5 w-5" /> Revision Required
@@ -161,7 +165,7 @@ export default function DatasetDetailPage() {
         
         <div className="space-y-6">
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="font-semibold text-slate-900">Dataset File</h3>
+            <h3 className="font-semibold text-slate-900">Submission File</h3>
             
             {hasFile ? (
               <div className="mt-4 flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -187,10 +191,10 @@ export default function DatasetDetailPage() {
                   ) : (
                     <><Upload className="h-5 w-5" /> {hasFile ? "Replace File" : "Upload File"}</>
                   )}
-                  <input type="file" className="sr-only" onChange={handleFileUpload} disabled={uploading} accept=".pdf,.docx,.csv,.nc,.nc4,.jpg,.jpeg,.png,.webp,.tif,.tiff,.mp4,.txt,.xml" />
+                  <input type="file" className="sr-only" onChange={handleFileUpload} disabled={uploading} accept={accept} />
                 </label>
                 {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
-                <p className="mt-2 text-xs text-slate-500">Supported formats: CSV, NetCDF, PDF, Images. Max 100MB.</p>
+                <p className="mt-2 text-xs text-slate-500">Supported formats: PDF, DOCX, CSV, NetCDF, images, MP4, TXT, and XML. The portal&apos;s upload limit applies. Photo submissions require an image; video submissions require MP4.</p>
               </div>
             )}
           </div>

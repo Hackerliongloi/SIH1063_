@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   Sparkles,
   Clapperboard,
+  BookOpen,
   FileText,
   CheckCircle2,
   AlertTriangle,
@@ -166,6 +167,8 @@ function GenerateStudioContent() {
                   { id: "twitter", label: "Twitter Thread", icon: TwitterIcon },
                   { id: "instagram", label: "Instagram Post", icon: InstagramIcon },
                   { id: "facebook", label: "Facebook Update", icon: FacebookIcon },
+                  { id: "carousel", label: "Image Carousel", icon: Layers },
+                  { id: "story", label: "Science Story", icon: BookOpen },
                   { id: "reel", label: "Reel Script", icon: Clapperboard },
                 ].map((fmt) => {
                   const Icon = fmt.icon;

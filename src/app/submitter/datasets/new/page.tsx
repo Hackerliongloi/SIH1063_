@@ -1,14 +1,23 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LoaderCircle } from "lucide-react";
 
+const submissionTypes = [
+  { value: "dataset", label: "Scientific dataset" },
+  { value: "report", label: "Report" },
+  { value: "publication", label: "Publication" },
+  { value: "photo", label: "Photo or image" },
+  { value: "video", label: "Video" },
+  { value: "activity", label: "Research activity" },
+] as const;
+
 export default function NewDatasetPage() {
   const router = useRouter();
   const [title, setTitle] = useState("");
+  const [type, setType] = useState<(typeof submissionTypes)[number]["value"]>("dataset");
   const [description, setDescription] = useState("");
   const [region, setRegion] = useState("Antarctica");
   const [station, setStation] = useState("");
@@ -26,7 +35,7 @@ export default function NewDatasetPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: "dataset",
+          type,
           title,
           description,
           region,
@@ -49,13 +58,20 @@ export default function NewDatasetPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
-      <h1 className="text-2xl font-bold text-[#143b5e]">New Dataset Submission</h1>
-      <p className="mt-1 text-sm text-slate-500">Provide the initial metadata for your dataset. You can upload the data file in the next step.</p>
+      <h1 className="text-2xl font-bold text-[#143b5e]">New Submission</h1>
+      <p className="mt-1 text-sm text-slate-500">Choose what you are submitting, add its metadata, then upload the file in the next step.</p>
       
       <form onSubmit={handleSubmit} className="mt-8 space-y-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div>
-          <label className="mb-2 block text-sm font-semibold text-slate-700">Dataset Title *</label>
-          <input required type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-sky-600 focus:ring-1 focus:ring-sky-600" />
+          <label htmlFor="submission-type" className="mb-2 block text-sm font-semibold text-slate-700">Submission type *</label>
+          <select id="submission-type" required value={type} onChange={e => setType(e.target.value as typeof type)} className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-sky-600 focus:ring-1 focus:ring-sky-600">
+            {submissionTypes.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label htmlFor="submission-title" className="mb-2 block text-sm font-semibold text-slate-700">Title *</label>
+          <input id="submission-title" required type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-sky-600 focus:ring-1 focus:ring-sky-600" />
         </div>
         
         <div>

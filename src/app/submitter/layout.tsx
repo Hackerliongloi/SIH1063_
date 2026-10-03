@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import Link from "next/link";
@@ -50,7 +48,7 @@ export default function SubmitterLayout({ children }: { children: ReactNode }) {
         <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-600">
           <span><span className="font-semibold text-[#143b5e]">Signed in:</span> {user.email} <span className="ml-2 rounded-full bg-sky-50 px-2.5 py-1 font-semibold uppercase text-[#12679a]">{user.role}</span></span>
           <nav aria-label="Submitter pages" className="flex flex-wrap items-center gap-3 font-semibold text-[#12679a]">
-            <Link href="/submitter/datasets">My Datasets</Link>
+            <Link href="/submitter/datasets">My Submissions</Link>
           </nav>
         </div>
         <button onClick={signOut} className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-[#12679a] hover:text-[#143b5e]">
