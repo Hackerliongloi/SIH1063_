@@ -62,18 +62,18 @@ class MediaIn(BaseModel): asset_id:int;kind:Literal["image","video"];alt_text:st
 class CitationIn(BaseModel): asset_id:int|None=None;chunk_id:int|None=None;slide_position:int|None=Field(default=None,ge=0,le=19);claim_text:str=Field(min_length=1,max_length=5000);span_text:str=Field(default="",max_length=10000);source_url:str|None=None;label:str=Field(default="",max_length=500)
 class StorySlideIn(BaseModel): position:int=Field(ge=0,le=19);kind:Literal["text","image","video"]="text";title:str=Field(default="",max_length=300);body:str=Field(default="",max_length=3000);asset_id:int|None=None;alt_text:str=Field(default="",max_length=1000);duration_seconds:int=Field(default=5,ge=2,le=30)
 class StoryIn(BaseModel): title:str=Field(min_length=1,max_length=300);summary:str=Field(default="",max_length=3000);hashtags:list[str]=Field(default_factory=list);expedition_id:int|None=None;region:str|None=Field(default=None,max_length=120);station:str|None=Field(default=None,max_length=120);ai_assisted:bool=False;expires_at:datetime|None=None;slides:list[StorySlideIn]=Field(min_length=1,max_length=20);citations:list[CitationIn]=Field(default_factory=list)
-def item_json(x, webhook_delivery_status=None):
+def item_json(x, webhook_delivery_status=None, include_internal=False):
     asset=x.primary_asset
-    serialized_asset=(None if asset is None else {
+    serialized_asset=(None if asset is None or (asset.access_level!="public" and not include_internal) else {
         "id":asset.id,"type":asset.type,"title":asset.title,
         "external_url":asset.external_url,"file_key":asset.file_key,
         "thumb_key":asset.thumb_key,"metadata":asset.metadata_json or {},
     })
-    media=[{"id":m.asset.id,"type":m.kind,"title":m.asset.title,"external_url":m.asset.external_url,"file_key":m.asset.file_key,"thumb_key":m.asset.thumb_key,"alt_text":m.alt_text,"metadata":m.asset.metadata_json or {}} for m in x.media if m.asset]
+    media=[{"id":m.asset.id,"type":m.kind,"title":m.asset.title,"external_url":m.asset.external_url,"file_key":m.asset.file_key,"thumb_key":m.asset.thumb_key,"alt_text":m.alt_text,"metadata":m.asset.metadata_json or {}} for m in x.media if m.asset and (m.asset.access_level=="public" or include_internal)]
     if not media and serialized_asset and serialized_asset["type"] in {"photo","video"}:media=[{**serialized_asset,"type":"video" if serialized_asset["type"]=="video" else "image","alt_text":""}]
-    sources=[{"asset_id":c.asset_id,"chunk_id":c.chunk_id,"label":c.label or (c.asset.title if c.asset else ""),"source_url":c.source_url or (c.asset.external_url if c.asset else None),"claim_text":c.claim_text,"span_text":c.span_text,"supported":c.supported} for c in x.sources]
+    sources=[{"asset_id":c.asset_id,"chunk_id":c.chunk_id,"label":c.label or (c.asset.title if c.asset else ""),"source_url":c.source_url or (c.asset.external_url if c.asset and (c.asset.access_level=="public" or include_internal) else None),"claim_text":c.claim_text,"span_text":c.span_text,"supported":c.supported} for c in x.sources if not c.asset or c.asset.access_level=="public" or include_internal]
     video_media=next((entry.asset for entry in x.media if entry.kind=="video" and entry.asset),None)
-    video_asset=video_media or (asset if asset and asset.type=="video" else None)
+    video_asset=(video_media if video_media and (video_media.access_level=="public" or include_internal) else None) or (asset if asset and asset.type=="video" and (asset.access_level=="public" or include_internal) else None)
     video_url=(f"/api/assets/{video_asset.id}/media" if video_asset and video_asset.file_key else video_asset.external_url if video_asset else None)
 
     return {"id":x.id,"kind":x.kind,"caption":x.caption,"title":x.title,"description":x.description,"region":x.region,"station":x.station,"event_at":x.event_at,"hashtags":x.hashtags,"expedition_id":x.expedition_id,"primary_asset_id":x.primary_asset_id,"primary_asset":serialized_asset,"media":media,"sources":sources,"poster_key":x.poster_key,"hls_key":x.hls_key,"mp4_key":x.mp4_key,"video_url":video_url,"duration_s":x.duration_s,"aspect":x.aspect,"status":x.status,"scheduled_at":x.scheduled_at,"approved_at":x.approved_at,"published_at":x.published_at,"updated_at":x.updated_at,"rank_score":x.rank_score,"like_count":x.like_count,"view_count":x.view_count,"share_count":x.share_count,"ai_assisted":x.ai_assisted,"source":x.source,"webhook_delivery_status":webhook_delivery_status}
@@ -94,8 +94,10 @@ def citation_row(data:CitationIn, story_id:int|None=None, slide_id:int|None=None
     if story_id is not None:return StoryCitation(story_id=story_id,slide_id=slide_id,**values)
     return FeedCitation(item_id=item_id,**values)
 
-def story_json(story:OutreachStory):
-    return {"id":story.id,"title":story.title,"summary":story.summary,"hashtags":story.hashtags,"status":story.status,"expedition_id":story.expedition_id,"region":story.region,"station":story.station,"ai_assisted":story.ai_assisted,"scheduled_at":story.scheduled_at,"approved_at":story.approved_at,"published_at":story.published_at,"expires_at":story.expires_at,"created_at":story.created_at,"updated_at":story.updated_at,"slides":[{"id":s.id,"position":s.position,"kind":s.kind,"title":s.title,"body":s.body,"asset_id":s.asset_id,"asset_url":s.asset.external_url if s.asset else None,"file_key":s.asset.file_key if s.asset else None,"thumb_key":s.asset.thumb_key if s.asset else None,"alt_text":s.alt_text,"duration_seconds":s.duration_seconds} for s in story.slides],"sources":[{"slide_id":c.slide_id,"asset_id":c.asset_id,"chunk_id":c.chunk_id,"label":c.label or (c.asset.title if c.asset else ""),"source_url":c.source_url or (c.asset.external_url if c.asset else None),"claim_text":c.claim_text,"span_text":c.span_text,"supported":c.supported} for c in story.citations]}
+def story_json(story:OutreachStory, include_internal=False):
+    slides=[{"id":s.id,"position":s.position,"kind":s.kind,"title":s.title,"body":s.body,"asset_id":s.asset_id if s.asset and (s.asset.access_level=="public" or include_internal) else None,"asset_url":s.asset.external_url if s.asset and (s.asset.access_level=="public" or include_internal) else None,"file_key":s.asset.file_key if s.asset and (s.asset.access_level=="public" or include_internal) else None,"thumb_key":s.asset.thumb_key if s.asset and (s.asset.access_level=="public" or include_internal) else None,"alt_text":s.alt_text,"duration_seconds":s.duration_seconds} for s in story.slides]
+    sources=[{"slide_id":c.slide_id,"asset_id":c.asset_id if c.asset and (c.asset.access_level=="public" or include_internal) else None,"chunk_id":c.chunk_id if c.asset and (c.asset.access_level=="public" or include_internal) else None,"label":c.label or (c.asset.title if c.asset else ""),"source_url":c.source_url or (c.asset.external_url if c.asset and (c.asset.access_level=="public" or include_internal) else None),"claim_text":c.claim_text,"span_text":c.span_text,"supported":c.supported} for c in story.citations if not c.asset or c.asset.access_level=="public" or include_internal]
+    return {"id":story.id,"title":story.title,"summary":story.summary,"hashtags":story.hashtags,"status":story.status,"expedition_id":story.expedition_id,"region":story.region,"station":story.station,"ai_assisted":story.ai_assisted,"scheduled_at":story.scheduled_at,"approved_at":story.approved_at,"published_at":story.published_at,"expires_at":story.expires_at,"created_at":story.created_at,"updated_at":story.updated_at,"slides":slides,"sources":sources}
 def anon_cookie(request:Request,response:Response):
     import secrets
     raw=request.cookies.get("polar_anon")
@@ -141,7 +143,7 @@ def public_stories(limit:int=20,db:Session=Depends(get_db)):
 def manage_stories(status:str|None=None,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):
     q=select(OutreachStory)
     if status:q=q.where(OutreachStory.status==status)
-    return [story_json(story) for story in db.scalars(q.order_by(OutreachStory.updated_at.desc()))]
+    return [story_json(story,include_internal=True) for story in db.scalars(q.order_by(OutreachStory.updated_at.desc()))]
 
 @router.post("/outreach/stories",status_code=201)
 def create_story(data:StoryIn,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
@@ -149,7 +151,7 @@ def create_story(data:StoryIn,db:Session=Depends(get_db),u=Depends(require_roles
     db.add(story);db.flush()
     try:_write_story(story,data,db);db.commit();db.refresh(story)
     except Exception:db.rollback();raise
-    return story_json(story)
+    return story_json(story,include_internal=True)
 
 @router.put("/outreach/stories/{story_id}")
 def update_story(story_id:int,data:StoryIn,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
@@ -159,7 +161,7 @@ def update_story(story_id:int,data:StoryIn,db:Session=Depends(get_db),u=Depends(
     story.citations.clear()
     try:_write_story(story,data,db);story.updated_at=now();db.commit();db.refresh(story)
     except Exception:db.rollback();raise
-    return story_json(story)
+    return story_json(story,include_internal=True)
 
 @router.get("/outreach/stories/{story_id}")
 def get_public_story(story_id:int,db:Session=Depends(get_db)):
@@ -189,7 +191,7 @@ def transition_story(story_id:int,data:dict,db:Session=Depends(get_db),u=Depends
     if action=="approve":story.approved_at=now()
     if story.status=="published":story.published_at=now()
     if action=="unpublish":story.published_at=None;story.scheduled_at=None
-    story.updated_at=now();db.commit();db.refresh(story);return story_json(story)
+    story.updated_at=now();db.commit();db.refresh(story);return story_json(story,include_internal=True)
 
 @router.get("/feed")
 def feed(cursor:str|None=None,tab:str="for_you",expedition:int|None=None,tag:str|None=None,region:str|None=None,station:str|None=None,year:int|None=None,content_type:str|None=None,limit:int=20,db:Session=Depends(get_db)):
@@ -240,7 +242,7 @@ def manage_feed_items(kind:str|None=None,status:str|None=None,limit:int=100,db:S
     status_by_item={}
     for event in deliveries:
         status_by_item.setdefault(event.feed_item_id,{"id":event.id,"state":event.state,"attempts":event.attempts,"last_error":event.last_error})
-    return [item_json(item,status_by_item.get(item.id)) for item in items]
+    return [item_json(item,status_by_item.get(item.id),include_internal=True) for item in items]
 
 @router.delete("/feed/items/{item_id}", status_code=204)
 def delete_feed_item(item_id:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
@@ -342,7 +344,7 @@ def discovery_search(q:str="",content_type:str|None=None,region:str|None=None,ex
 def get_feed_item(item_id:int,db:Session=Depends(get_db)):
     x=db.get(FeedItem,item_id)
     if not x or x.status!="published":raise HTTPException(404,"Feed item not found")
-    return item_json(x)
+    return item_json(x,include_internal=True)
 @router.post("/feed/{item_id}/react")
 def react(item_id:int,data:ReactionIn,request:Request,response:Response,db:Session=Depends(get_db)):
     enforce_rate_limit(request,"feed-write",30,60)
@@ -371,7 +373,7 @@ def create_item(data:FeedIn,db:Session=Depends(get_db),u=Depends(require_roles("
     if data.primary_asset_id:
         asset=db.get(Asset,data.primary_asset_id)
         if asset and asset.type=="video":x.mp4_key=asset.file_key
-    db.add(x);db.commit();db.refresh(x);return item_json(x)
+    db.add(x);db.commit();db.refresh(x);return item_json(x,include_internal=True)
 
 @router.put("/feed/items/{item_id}/media")
 def replace_item_media(item_id:int,items:list[MediaIn],db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
@@ -392,7 +394,7 @@ def replace_item_media(item_id:int,items:list[MediaIn],db:Session=Depends(get_db
         item.primary_asset_id=assets[0].id
         video=next((asset for asset,entry in zip(assets,items) if entry.kind=="video"),None)
         if video:item.mp4_key=video.file_key
-    db.commit();db.refresh(item);return item_json(item)
+    db.commit();db.refresh(item);return item_json(item,include_internal=True)
 
 @router.post("/feed/items/{item_id}/sources",status_code=201)
 def add_item_source(item_id:int,data:CitationIn,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
@@ -409,7 +411,7 @@ def edit_item(item_id:int,data:dict,db:Session=Depends(get_db),u=Depends(require
     if x.status in {"published","rejected"}:raise HTTPException(409,"Cannot edit this item in its current state")
     for k in {"caption","hashtags","primary_asset_id","expedition_id","scheduled_at","editorial_boost"}:
         if k in data:setattr(x,k,data[k])
-    db.commit();db.refresh(x);return item_json(x)
+    db.commit();db.refresh(x);return item_json(x,include_internal=True)
 @router.post("/feed/items/{item_id}/transition")
 def feed_transition(item_id:int,data:dict,db:Session=Depends(get_db),u=Depends(current_user)):
     x=db.get(FeedItem,item_id)
@@ -443,7 +445,7 @@ def feed_transition(item_id:int,data:dict,db:Session=Depends(get_db),u=Depends(c
             if action=="approve":draft.approved_at=now()
             if action=="publish":draft.published_at=now()
             if action in {"unpublish","unschedule"}:draft.published_at=None;draft.scheduled_at=None
-    db.commit();return item_json(x)
+    db.commit();return item_json(x,include_internal=True)
 @router.get("/feed/autogen/rules")
 def rules(db:Session=Depends(get_db),u=Depends(require_roles("admin"))):return [{"id":x.id,"name":x.name,"trigger":x.trigger,"template":x.template,"enabled":x.enabled,"auto_publish":x.auto_publish,"max_per_day":x.max_per_day} for x in db.scalars(select(AutogenRule))]
 @router.put("/feed/autogen/rules")

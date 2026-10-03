@@ -35,6 +35,13 @@ export default function DatasetDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  useEffect(() => {
+    if (dataset?.status !== "processing") return;
+    const timer = window.setInterval(() => { void loadDataset(); }, 5000);
+    return () => window.clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataset?.status, id]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
@@ -87,6 +94,7 @@ export default function DatasetDetailPage() {
 
   const canUpload = ["draft", "rejected"].includes(dataset.review_status) || dataset.status === "failed";
   const hasFile = !!dataset.file_key;
+  const hasSource = hasFile || !!dataset.external_url;
   const imageFormats = ".jpg,.jpeg,.png,.webp,.tif,.tiff";
   const accept = dataset.type === "photo" ? imageFormats : dataset.type === "video" ? ".mp4" : ".pdf,.docx,.csv,.nc,.nc4,.jpg,.jpeg,.png,.webp,.tif,.tiff,.mp4,.txt,.xml";
   
@@ -117,7 +125,7 @@ export default function DatasetDetailPage() {
           </div>
         </div>
         
-        {["draft", "rejected"].includes(dataset.review_status) && hasFile && (
+        {["draft", "rejected"].includes(dataset.review_status) && hasSource && dataset.status === "ready" && (
           <button 
             onClick={handleSubmitForReview} 
             disabled={submitting} 
@@ -179,6 +187,8 @@ export default function DatasetDetailPage() {
                   </p>
                 </div>
               </div>
+            ) : dataset.external_url ? (
+              <a href={dataset.external_url} target="_blank" rel="noreferrer" className="mt-4 block break-all text-sm text-sky-700 underline">Open provided HTTPS source</a>
             ) : (
               <p className="mt-4 text-sm text-slate-500">No file uploaded yet.</p>
             )}
