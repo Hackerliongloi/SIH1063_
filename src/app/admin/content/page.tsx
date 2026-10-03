@@ -12,10 +12,11 @@ import {
   X,
   Search,
   FilePlus2,
+  Trash2,
 } from "lucide-react";
 import { api } from "@/lib/api";
 
-type AssetRecord = { id: string | number; title: string; type?: string; region?: string; year?: number | string; version?: number | string; status?: string; review_status?: string; };
+type AssetRecord = { id: string | number; title: string; type?: string; region?: string; year?: number | string; version?: number | string; status?: string; review_status?: string; error?: string | null; };
 type ExpeditionRecord = { id: string | number; name: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -50,6 +51,8 @@ export default function AdminContentPage() {
   const [uploadType, setUploadType] = useState("report");
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [deletingAssetId, setDeletingAssetId] = useState<string | number | null>(null);
+  const [retryingAssetId, setRetryingAssetId] = useState<string | number | null>(null);
 
   const loadData = async () => {
     setLoadError(null);
@@ -91,14 +94,49 @@ export default function AdminContentPage() {
     return () => window.clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    if (!assets.some((asset) => asset.status === "processing")) return;
+    const timer = window.setInterval(() => { void loadData(); }, 10000);
+    return () => window.clearInterval(timer);
+  }, [assets]);
+
   const handleTransition = async (id: string | number, action: string) => {
     setLoading(true);
     try {
       await api.transitionDataset(id.toString(), action);
       await loadData();
-    } catch (err: any) {
-      setLoadError(err.message || "Failed to transition dataset");
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : "Failed to transition dataset");
       setLoading(false);
+    }
+  };
+
+  const handleDeleteAsset = async (asset: AssetRecord) => {
+    if (!window.confirm(`Delete “${asset.title}” from the repository? This cannot be undone.`)) return;
+    setDeletingAssetId(asset.id);
+    setUploadMessage(null);
+    try {
+      await api.deleteAsset(String(asset.id));
+      setUploadMessage(`Deleted “${asset.title}”.`);
+      await loadData();
+    } catch (err) {
+      setUploadMessage(`Error: ${err instanceof Error ? err.message : "The repository item could not be deleted."}`);
+    } finally {
+      setDeletingAssetId(null);
+    }
+  };
+
+  const handleRetryIngestion = async (asset: AssetRecord) => {
+    setRetryingAssetId(asset.id);
+    setUploadMessage(null);
+    try {
+      await api.retryIngestion(String(asset.id));
+      setUploadMessage(`Indexing restarted for “${asset.title}”.`);
+    } catch (err) {
+      setUploadMessage(`Error: ${err instanceof Error ? err.message : "Indexing could not be restarted."}`);
+    } finally {
+      await loadData();
+      setRetryingAssetId(null);
     }
   };
 
@@ -243,8 +281,9 @@ export default function AdminContentPage() {
                       Review: {a.review_status?.replace("_", " ") || "draft"}
                     </span>
                     <span className={`block w-max rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusBadge(a.status)}`}>
-                      File: {a.status}
+                      <span title={a.error || undefined}>File: {a.status}</span>
                     </span>
+                    {a.status === "failed" && a.error && <span className="block max-w-56 truncate text-[10px] text-rose-700" title={a.error}>{a.error}</span>}
                   </td>
                   <td className="space-x-2 px-5 py-4 text-right text-xs font-semibold">
                     {a.review_status === "in_review" && (
@@ -268,6 +307,11 @@ export default function AdminContentPage() {
                     >
                       Synthesize
                     </Link>
+                    <span>â€¢</span>
+                    {a.status === "failed" && <button type="button" onClick={() => void handleRetryIngestion(a)} disabled={retryingAssetId === a.id} className="mr-2 text-amber-800 hover:underline disabled:opacity-50">{retryingAssetId === a.id ? "Retrying…" : "Retry indexing"}</button>}
+                    <button type="button" onClick={() => void handleDeleteAsset(a)} disabled={deletingAssetId === a.id} className="text-rose-700 hover:underline disabled:opacity-50" aria-label={`Delete ${a.title}`}>
+                      <Trash2 className="inline h-3.5 w-3.5" /> {deletingAssetId === a.id ? "Deleting…" : "Delete"}
+                    </button>
                   </td>
                 </tr>
               ))}

@@ -14,12 +14,13 @@ import {
   Sparkles,
   ArrowRight,
   Eye,
+  Trash2,
 } from "lucide-react";
 import { TwitterIcon, InstagramIcon, FacebookIcon } from "@/components/SocialIcons";
 import { api } from "@/lib/api";
 
 type DraftComment = { id?: string | number; author_name?: string; body: string; created_at?: string };
-type DraftRecord = { id: string | number; kind: string; title: string; body_md?: string; tone?: string; status: string; created_by?: string | number; citations?: unknown[]; comments?: DraftComment[]; scheduled_at?: string | null; expedition_id?: string | number | null; public_story_id?: number | null };
+type DraftRecord = { id: string | number; kind: string; title: string; body_md?: string; tone?: string; status: string; created_by?: string | number; citations?: unknown[]; comments?: DraftComment[]; scheduled_at?: string | null; expedition_id?: string | number | null; public_story_id?: number | null; webhook_delivery_status?: { id?: number; state: string; attempts: number; last_error: string | null; }; };
 type CalendarRecord = DraftRecord;
 
 export default function EditorialDeskPage() {
@@ -34,25 +35,32 @@ export default function EditorialDeskPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [tickResult, setTickResult] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [currentRole, setCurrentRole] = useState<"admin" | "editor" | "reviewer" | null>(null);
 
-  const loadAll = async () => {
+  const loadAll = async (preferredDraftId?: string | null) => {
     setLoadError(null);
     try {
-      const [draftsRes, calRes] = await Promise.all([
+      const [draftsRes, calRes, sessionRes] = await Promise.all([
         api.getDrafts(),
         api.getCalendar(),
+        fetch("/api/auth/session", { cache: "no-store" }).then(async (response) => {
+          if (!response.ok) throw new Error("Your session could not be verified.");
+          return response.json() as Promise<{ role: "admin" | "editor" | "reviewer" }>;
+        }),
       ]);
+      setCurrentRole(sessionRes.role);
       const draftList = Array.isArray(draftsRes) ? draftsRes as DraftRecord[] : [];
       const calendarList = Array.isArray(calRes) ? calRes as CalendarRecord[] : [];
       setDrafts(draftList);
       setCalendarItems(calendarList);
-      const nextId = selectedDraftId || draftList[0]?.id;
+      const nextId = preferredDraftId === undefined ? (selectedDraftId || draftList[0]?.id) : (preferredDraftId || draftList[0]?.id);
       if (nextId) {
         const detail = await api.getDraft(String(nextId));
         setSelectedDraft(detail as DraftRecord);
         setSelectedDraftId(String(nextId));
       } else {
         setSelectedDraft(null);
+        setSelectedDraftId(null);
       }
     } catch (err) {
       console.error("Failed to load editorial data", err);
@@ -115,6 +123,33 @@ export default function EditorialDeskPage() {
     }
   };
 
+  const handleDeleteDraft = async () => {
+    if (!selectedDraftId || !window.confirm("Delete this draft and its unpublished linked content? This cannot be undone.")) return;
+    setActionLoading(true);
+    try {
+      await api.deleteDraft(selectedDraftId);
+      setSelectedDraftId(null);
+      setSelectedDraft(null);
+      await loadAll(null);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "The draft could not be deleted.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleWebhookRetry = async (eventId: string | number) => {
+    setActionLoading(true);
+    try {
+      await api.retryWebhook(eventId);
+      await loadAll();
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Webhook delivery could not be retried.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       draft: "bg-slate-100 text-slate-700 border-slate-300",
@@ -149,7 +184,8 @@ export default function EditorialDeskPage() {
             Editorial Review & Publishing State Machine
           </h1>
           <p className="text-xs text-slate-500">
-            Enforces strict role governance: Draft → Review → Approved → Scheduled → Published in Indian Standard Time (IST).
+            Enforces strict role governance: Draft → Review → Approved → Scheduled → Published in Indian Standard Time (IST).<br/>
+            Note: &quot;Webhook delivered&quot; means Zapier or Make accepted the request; it does not prove each social account published successfully.
           </p>
         </div>
 
@@ -232,7 +268,14 @@ export default function EditorialDeskPage() {
                     <span className="font-mono text-[#12679a] uppercase text-[10px] font-bold">
                       {d.kind}
                     </span>
-                    {getStatusBadge(d.status)}
+                    <div className="flex gap-2 items-center">
+                      {d.webhook_delivery_status && (
+                        <span title={d.webhook_delivery_status.last_error || ""} className={`px-1.5 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider border ${d.webhook_delivery_status.state === 'delivered' ? 'bg-green-100 text-green-700 border-green-200' : d.webhook_delivery_status.state === 'dead_letter' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-blue-100 text-blue-700 border-blue-200'}`}>
+                          Webhook: {d.webhook_delivery_status.state}
+                        </span>
+                      )}
+                      {getStatusBadge(d.status)}
+                    </div>
                   </div>
 
                   <h3 className="font-bold text-[#143b5e] text-sm line-clamp-2 leading-snug">
@@ -287,6 +330,8 @@ export default function EditorialDeskPage() {
                   </label>}
 
                   <div className="flex flex-wrap gap-2">
+                    {selectedDraft.webhook_delivery_status?.state === "dead_letter" && selectedDraft.webhook_delivery_status.id && <button type="button" onClick={() => void handleWebhookRetry(selectedDraft.webhook_delivery_status!.id!)} disabled={actionLoading} className="px-3 py-2 rounded-lg bg-amber-100 text-amber-900 text-xs font-medium disabled:opacity-50">Retry webhook</button>}
+                    {selectedDraft.status !== "published" && (currentRole === "admin" || currentRole === "editor") && <button type="button" onClick={() => void handleDeleteDraft()} disabled={actionLoading} className="px-3 py-2 rounded-lg border border-rose-200 bg-rose-50 text-rose-800 text-xs font-medium disabled:opacity-50"><Trash2 className="mr-1 inline h-3.5 w-3.5"/>Delete draft</button>}
                     {/* Submit for review */}
                     {["draft", "changes_requested"].includes(selectedDraft.status) && (
                       <button

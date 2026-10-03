@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     model_path: str = ""
     admin_email: str = "admin@polar.local"
     admin_password: str = "ChangeMe-Local-Only-123!"
+    social_webhook_enabled: bool = False
+    social_webhook_url: str = ""
+    social_webhook_secret: str = ""
+    public_app_url: str = "http://localhost:3000"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""

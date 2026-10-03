@@ -163,6 +163,7 @@ export async function fetchFromAPI(endpoint: string, options?: RequestInit, allo
       throw new Error(detail || payload?.message || `Request failed (${res.status}). Please try again.`);
     }
 
+    if (res.status === 204) return null;
     return await res.json();
   } catch (err) {
     const fallback = allowDemoFallback ? mockResponseFor(endpoint) : null;
@@ -252,6 +253,9 @@ export const api = {
     if (reviewStatus !== undefined) q.append("review_status", reviewStatus);
     return listFromResponse(await fetchFromAPI(`/assets?${q.toString()}`, undefined, false));
   },
+  getGenerateSources: async () => {
+    return listFromResponse(await fetchFromAPI("/generate/sources"));
+  },
 
   // Grounded Generation
   generateContent: async (payload: {
@@ -276,6 +280,10 @@ export const api = {
     return fetchFromAPI(`/editorial/drafts?${q.toString()}`);
   },
   getDraft: (id: string) => fetchFromAPI(`/editorial/drafts/${id}`),
+  deleteDraft: (id: string) => fetchFromAPI(`/editorial/drafts/${id}`, { method: "DELETE" }, false),
+  deleteAsset: (id: string) => fetchFromAPI(`/assets/${id}`, { method: "DELETE" }, false),
+  retryIngestion: (id: string) => fetchFromAPI(`/ingest/${id}/retry`, { method: "POST" }, false),
+  retryWebhook: (id: string | number) => fetchFromAPI(`/webhooks/outbox/${id}/retry`, { method: "POST" }, false),
   transitionDraft: (
     id: string,
     action: string,
