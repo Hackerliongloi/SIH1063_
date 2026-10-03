@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from .core.db import SessionLocal
 from .models import Asset, Chunk, Draft, now
-from .services import read_file, extract_text
+from .services import read_file, extract_text, build_asset_index_text
 from .embeddings import embed
 # Register feed models before any worker thread or RQ job triggers mapper setup.
 # WebhookOutbox and FeedItem have foreign keys/queries that depend on these tables.
@@ -16,9 +16,10 @@ def process_asset(asset_id:int,key:str,suffix:str):
         try:
             asset.processing_status="processing";asset.error=None;asset.updated_at=now();db.commit()
             data=read_file(key);text=extract_text(data,suffix)
+            index_text,index_mode=build_asset_index_text(asset,text)
             db.query(Chunk).filter(Chunk.asset_id==asset_id).delete()
-            for i in range(0,len(text),2500):
-                chunk_text=text[i:i+3000]
+            for i in range(0,len(index_text),2500):
+                chunk_text=index_text[i:i+3000]
                 db.add(Chunk(asset_id=asset_id,idx=i//2500,text=chunk_text,embedding=embed(chunk_text)))
 
             if asset.type == "video" and not asset.thumb_key:
@@ -28,6 +29,7 @@ def process_asset(asset_id:int,key:str,suffix:str):
                     thumb_key = store_file(poster_data, "jpg", "image/jpeg")
                     asset.thumb_key = thumb_key
 
+            asset.metadata_json={**(asset.metadata_json or {}),"_index_mode":index_mode}
             asset.processing_status="ready";asset.error=None;db.commit()
         except Exception as e:
             db.rollback()

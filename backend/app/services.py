@@ -104,6 +104,31 @@ def extract_text(data:bytes,suffix:str)->str:
         ds=xr.open_dataset(io.BytesIO(data));return f"NetCDF variables: {', '.join(ds.data_vars)}\nDimensions: {dict(ds.sizes)}"
     return ""
 
+def build_asset_index_text(asset, extracted_text:str)->tuple[str,str]:
+    """Build searchable, citable text from extracted file text plus repository metadata.
+
+    Some valid archive items (photos, video, links, scanned PDFs) have no text
+    layer. Metadata still provides a narrow, honest source for generation; callers
+    store the returned mode so the UI can distinguish that from document text.
+    """
+    metadata=[f"Title: {asset.title}",f"Content type: {asset.type}"]
+    if asset.description: metadata.append(f"Description: {asset.description}")
+    if asset.region: metadata.append(f"Region: {asset.region}")
+    if asset.station: metadata.append(f"Station: {asset.station}")
+    if asset.year: metadata.append(f"Year: {asset.year}")
+    if asset.record_date: metadata.append(f"Record date: {asset.record_date.isoformat()}")
+    if asset.expedition: metadata.append(f"Expedition: {asset.expedition.name}")
+    if asset.authors: metadata.append("Authors: " + ", ".join(asset.authors))
+    tags=[tag.name for tag in getattr(asset,"tags",[]) or []]
+    if tags: metadata.append("Keywords: " + ", ".join(tags))
+    details=(asset.metadata_json or {}).get("type_details",{})
+    if isinstance(details,dict):
+        metadata.extend(f"{key.replace('_',' ').title()}: {value}" for key,value in details.items() if value not in (None,""))
+    file_text=(extracted_text or "").strip()
+    if file_text:
+        return "Repository metadata:\n"+"\n".join(metadata)+"\n\nExtracted source text:\n"+file_text,"document_and_metadata"
+    return "Repository metadata only (no text could be extracted from the attached source):\n"+"\n".join(metadata),"metadata_only"
+
 def generate_video_poster(file_data: bytes, suffix: str) -> bytes | None:
     try:
         import av

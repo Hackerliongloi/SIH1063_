@@ -18,9 +18,12 @@ import {
 } from "lucide-react";
 import { TwitterIcon, InstagramIcon, FacebookIcon } from "@/components/SocialIcons";
 import { api } from "@/lib/api";
+import { getMediaUrl } from "@/lib/media";
 
 type DraftComment = { id?: string | number; author_name?: string; body: string; created_at?: string };
-type DraftRecord = { id: string | number; kind: string; title: string; body_md?: string; tone?: string; status: string; created_by?: string | number; citations?: unknown[]; comments?: DraftComment[]; scheduled_at?: string | null; expedition_id?: string | number | null; public_story_id?: number | null; webhook_delivery_status?: { id?: number; state: string; attempts: number; last_error: string | null; }; };
+type LinkedMedia = { id: number; type: string; title?: string; external_url?: string | null; file_key?: string | null; thumb_key?: string | null; alt_text?: string };
+type LinkedContent = { id: number; kind: string; caption?: string; title?: string; description?: string; status: string; primary_asset?: LinkedMedia | null; media?: LinkedMedia[] };
+type DraftRecord = { id: string | number; kind: string; title: string; body_md?: string; tone?: string; status: string; created_by?: string | number; citations?: unknown[]; comments?: DraftComment[]; scheduled_at?: string | null; expedition_id?: string | number | null; public_story_id?: number | null; linked_content?: LinkedContent | null; webhook_delivery_status?: { id?: number; state: string; attempts: number; last_error: string | null; }; };
 type CalendarRecord = DraftRecord;
 
 export default function EditorialDeskPage() {
@@ -88,6 +91,7 @@ export default function EditorialDeskPage() {
 
   const handleAction = async (action: string) => {
     if (!selectedDraftId) return;
+    if (action === "unpublish" && !window.confirm("Unpublish this item from the Polar Portal? This removes it from public portal views and moves it back to Approved. Posts already sent by an external social platform cannot be recalled here.")) return;
     if (action === "comment" && !commentInput.trim()) {
       setLoadError("Enter an editorial note before adding a comment.");
       return;
@@ -319,6 +323,33 @@ export default function EditorialDeskPage() {
                   </div>
                 </div>
 
+                {/* Exact linked post/media admins will approve or unpublish */}
+                {selectedDraft.kind !== "article" && (
+                  <section aria-label="Generated social post preview" className="overflow-hidden rounded-xl border border-sky-200 bg-white">
+                    <div className="border-b border-sky-100 bg-sky-50 px-4 py-2 text-[11px] font-mono font-semibold uppercase tracking-wide text-sky-900">Portal post preview · {selectedDraft.kind}</div>
+                    <div className="p-4 space-y-3">
+                      {(() => {
+                        const item = selectedDraft.linked_content;
+                        const media = item?.media?.length ? item.media : item?.primary_asset ? [item.primary_asset] : [];
+                        if (!item) return <p className="text-sm text-slate-600">No linked feed item was found for this draft. Review the draft text and citations below before approval.</p>;
+                        return <>
+                          <div className="flex items-center gap-2 text-xs text-slate-500"><span className="font-semibold text-[#143b5e]">Portal feed item #{item.id}</span><span>·</span><span className="capitalize">{item.status.replace("_", " ")}</span></div>
+                          {media.length ? <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{media.map((asset, index) => {
+                            const video = asset.type === "video";
+                            const url = video ? `/api/assets/${asset.id}/media` : getMediaUrl(asset.thumb_key || asset.file_key || asset.external_url);
+                            return <div key={`${asset.id}-${index}`} className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              {url ? (video ? <video src={url} poster={getMediaUrl(asset.thumb_key) || undefined} controls playsInline preload="metadata" className="max-h-80 w-full bg-black object-contain" /> : <img src={url} alt={asset.alt_text || asset.title || `Post media ${index + 1}`} className="max-h-80 w-full object-contain" />) : <div className="p-6 text-sm text-slate-500">Media URL is unavailable.</div>}
+                              <div className="px-3 py-2 text-xs text-slate-600">{asset.title || (video ? "Video attachment" : "Image attachment")}</div>
+                            </div>;
+                          })}</div> : <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-600">No media is attached. This will appear as a text-only post.</div>}
+                          <div className="rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-700 whitespace-pre-line">{item.caption || selectedDraft.body_md || "No post text is available."}</div>
+                        </>;
+                      })()}
+                    </div>
+                  </section>
+                )}
+
                 {/* State Machine Transition Actions */}
                 <div className="space-y-3 pt-4 border-t border-slate-200">
                   <h4 className="text-xs font-mono uppercase tracking-wider text-slate-600">
@@ -404,6 +435,7 @@ export default function EditorialDeskPage() {
                         View Public Story Page <ArrowRight className="w-3.5 h-3.5" />
                       </Link>
                     )}
+                    {selectedDraft.status === "published" && currentRole === "admin" && <button type="button" onClick={() => void handleAction("unpublish")} disabled={actionLoading} className="px-3 py-2 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-xs font-semibold disabled:opacity-50">Unpublish</button>}
                   </div>
 
                   {/* Comment Box */}

@@ -18,7 +18,7 @@ import {
 import { TwitterIcon, InstagramIcon, FacebookIcon } from "@/components/SocialIcons";
 import { api } from "@/lib/api";
 
-type StudioAsset = { id: string | number; title: string; type?: string; region?: string; year?: string | number; review_status?: string; chunk_count?: number };
+type StudioAsset = { id: string | number; title: string; type?: string; region?: string; year?: string | number; review_status?: string; status?: string; has_source?: boolean; index_mode?: string; index_error?: string | null; chunk_count?: number };
 type StudioExpedition = { id: string | number; name: string };
 type StudioCitation = { chunk_id?: string | number; claim_text?: string; span_text?: string };
 type GeneratedDraft = { id: string | number; kind: string; tone?: string; audience?: string; reading_level?: string; max_length?: number; title: string; body_md: string; citations?: StudioCitation[] };
@@ -50,6 +50,7 @@ function GenerateStudioContent() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusIsError, setStatusIsError] = useState(false);
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null);
+  const [reindexingId, setReindexingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -59,6 +60,8 @@ function GenerateStudioContent() {
           api.getLiveExpeditions(),
         ]);
         setAssets(Array.isArray(assetsRes) ? assetsRes as StudioAsset[] : []);
+        const loaded = Array.isArray(assetsRes) ? assetsRes as StudioAsset[] : [];
+        setSelectedAssetIds((current) => current.filter((id) => loaded.some((asset) => String(asset.id) === id && asset.status === "ready" && (asset.chunk_count ?? 0) > 0)));
         setExpeditions(Array.isArray(expRes) ? expRes as StudioExpedition[] : []);
       } catch (err) {
         console.error("Failed to load studio assets", err);
@@ -68,6 +71,25 @@ function GenerateStudioContent() {
     const timer = window.setTimeout(() => { void loadData(); }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!assets.some((asset) => asset.status === "processing")) return;
+    const timer = window.setInterval(() => {
+      void api.getGenerateSources().then((rows) => { if (Array.isArray(rows)) setAssets(rows as StudioAsset[]); }).catch(() => undefined);
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [assets]);
+
+  const handleReindex = async (asset: StudioAsset) => {
+    setReindexingId(String(asset.id)); setStatusIsError(false); setStatusMessage(null);
+    try {
+      await api.retryIngestion(String(asset.id));
+      setAssets((current) => current.map((row) => String(row.id) === String(asset.id) ? { ...row, status: "processing" } : row));
+      setStatusMessage(`Re-indexing started for “${asset.title}”. This source will become selectable after indexing finishes.`);
+    } catch (error) {
+      setStatusIsError(true); setStatusMessage(error instanceof Error ? error.message : "Could not restart indexing.");
+    } finally { setReindexingId(null); }
+  };
 
   const toggleFormat = (fmt: string) => {
     if (selectedFormats.includes(fmt)) {
@@ -277,7 +299,7 @@ function GenerateStudioContent() {
             </div>
 
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Ready reports and datasets in draft, review, or approved status can be used. Every draft is citation checked and still needs editorial approval. Source text is sent to the configured OpenRouter model.
+              Indexed sources in draft, review, or approved status can be used. Items without text are disabled until indexing succeeds. Metadata-only sources use only the submitted record details. Every draft is citation checked and needs editorial approval.
             </p>
 
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -286,7 +308,7 @@ function GenerateStudioContent() {
               {assets.map((a) => {
                 const checked = selectedAssetIds.includes(String(a.id));
                 return (
-                  <label
+                  <div
                     key={a.id}
                     className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-xs transition-all ${
                       checked
@@ -296,18 +318,24 @@ function GenerateStudioContent() {
                   >
                     <input
                       type="checkbox"
+                      id={`source-${a.id}`}
                       checked={checked}
                       onChange={() => toggleAsset(String(a.id))}
+                      disabled={(a.chunk_count ?? 0) === 0 || a.status !== "ready"}
+                      title={a.status !== "ready" ? "Wait for indexing to finish" : (a.chunk_count ?? 0) === 0 ? "This record has no indexed text yet" : undefined}
                       className="mt-0.5 rounded border-slate-700 text-sky-600 focus:ring-0"
                     />
-                    <div className="space-y-0.5 flex-1">
+                    <div className="min-w-0 flex-1">
+                      <label htmlFor={`source-${a.id}`} className="block space-y-0.5">
                       <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
-                        <span className="uppercase text-[#12679a]">{a.type} · {a.review_status} · {a.chunk_count ?? 0} chunks</span>
+                        <span className="uppercase text-[#12679a]">{a.type} · {a.review_status} · {a.chunk_count ?? 0} chunks{a.index_mode === "metadata_only" ? " · metadata only" : ""}</span>
                         <span>{a.region} • {a.year}</span>
                       </div>
                       <p className="font-semibold line-clamp-1">{a.title}</p>
+                      </label>
+                      {(a.chunk_count ?? 0) === 0 && <div className="mt-1 flex items-center justify-between gap-2"><span className="text-amber-700">{a.has_source ? (a.status === "processing" ? "Indexing in progress…" : "No indexed text; cannot generate yet") : "Attach a source file or link first"}</span>{a.has_source && a.status !== "processing" && <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void handleReindex(a); }} disabled={reindexingId === String(a.id)} className="shrink-0 font-semibold text-sky-700 underline disabled:opacity-50">{reindexingId === String(a.id) ? "Starting…" : "Re-index"}</button>}</div>}
                     </div>
-                  </label>
+                  </div>
                 );
               })}
             </div>
