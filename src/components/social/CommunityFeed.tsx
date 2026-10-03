@@ -167,10 +167,10 @@ export function CommunityFeed() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 relative">
+    <div className="w-full bg-slate-50 relative">
       <StoryTray stories={stories} onStoryClick={setActiveStory} />
       
-      <main className="max-w-2xl mx-auto px-4 pb-20 space-y-8">
+      <main className="max-w-2xl mx-auto px-4 pb-12 space-y-5">
         
         {/* Filter Controls */}
         <div className="flex items-center gap-2 overflow-x-auto pb-2 hide-scrollbar">

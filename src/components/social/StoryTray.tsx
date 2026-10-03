@@ -5,13 +5,13 @@ export function StoryTray({ stories, onStoryClick }: any) {
   if (!stories || stories.length === 0) return null;
 
   return (
-    <div className="w-full bg-white/80 backdrop-blur-xl border-b border-slate-200 py-6 mb-8 overflow-hidden">
+    <div className="w-full bg-white/80 backdrop-blur-xl border-b border-slate-200 py-4 mb-4 overflow-hidden">
       <div className="max-w-3xl mx-auto px-4">
-        <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2">
+        <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest mb-3 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse"></span>
           Active Stories
         </h2>
-        <div className="flex gap-6 overflow-x-auto pb-4 pt-2 snap-x hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        <div className="flex gap-5 overflow-x-auto pb-2 pt-1 snap-x hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
           {stories.map((story: any) => (
             <button
               key={story.id}
