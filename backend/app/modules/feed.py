@@ -62,7 +62,7 @@ class MediaIn(BaseModel): asset_id:int;kind:Literal["image","video"];alt_text:st
 class CitationIn(BaseModel): asset_id:int|None=None;chunk_id:int|None=None;slide_position:int|None=Field(default=None,ge=0,le=19);claim_text:str=Field(min_length=1,max_length=5000);span_text:str=Field(default="",max_length=10000);source_url:str|None=None;label:str=Field(default="",max_length=500)
 class StorySlideIn(BaseModel): position:int=Field(ge=0,le=19);kind:Literal["text","image","video"]="text";title:str=Field(default="",max_length=300);body:str=Field(default="",max_length=3000);asset_id:int|None=None;alt_text:str=Field(default="",max_length=1000);duration_seconds:int=Field(default=5,ge=2,le=30)
 class StoryIn(BaseModel): title:str=Field(min_length=1,max_length=300);summary:str=Field(default="",max_length=3000);hashtags:list[str]=Field(default_factory=list);expedition_id:int|None=None;region:str|None=Field(default=None,max_length=120);station:str|None=Field(default=None,max_length=120);ai_assisted:bool=False;expires_at:datetime|None=None;slides:list[StorySlideIn]=Field(min_length=1,max_length=20);citations:list[CitationIn]=Field(default_factory=list)
-def item_json(x):
+def item_json(x, webhook_delivery_status=None):
     asset=x.primary_asset
     serialized_asset=(None if asset is None else {
         "id":asset.id,"type":asset.type,"title":asset.title,
@@ -75,7 +75,8 @@ def item_json(x):
     video_media=next((entry.asset for entry in x.media if entry.kind=="video" and entry.asset),None)
     video_asset=video_media or (asset if asset and asset.type=="video" else None)
     video_url=(f"/api/assets/{video_asset.id}/media" if video_asset and video_asset.file_key else video_asset.external_url if video_asset else None)
-    return {"id":x.id,"kind":x.kind,"caption":x.caption,"title":x.title,"description":x.description,"region":x.region,"station":x.station,"event_at":x.event_at,"hashtags":x.hashtags,"expedition_id":x.expedition_id,"primary_asset_id":x.primary_asset_id,"primary_asset":serialized_asset,"media":media,"sources":sources,"poster_key":x.poster_key,"hls_key":x.hls_key,"mp4_key":x.mp4_key,"video_url":video_url,"duration_s":x.duration_s,"aspect":x.aspect,"status":x.status,"scheduled_at":x.scheduled_at,"approved_at":x.approved_at,"published_at":x.published_at,"updated_at":x.updated_at,"rank_score":x.rank_score,"like_count":x.like_count,"view_count":x.view_count,"share_count":x.share_count,"ai_assisted":x.ai_assisted,"source":x.source}
+
+    return {"id":x.id,"kind":x.kind,"caption":x.caption,"title":x.title,"description":x.description,"region":x.region,"station":x.station,"event_at":x.event_at,"hashtags":x.hashtags,"expedition_id":x.expedition_id,"primary_asset_id":x.primary_asset_id,"primary_asset":serialized_asset,"media":media,"sources":sources,"poster_key":x.poster_key,"hls_key":x.hls_key,"mp4_key":x.mp4_key,"video_url":video_url,"duration_s":x.duration_s,"aspect":x.aspect,"status":x.status,"scheduled_at":x.scheduled_at,"approved_at":x.approved_at,"published_at":x.published_at,"updated_at":x.updated_at,"rank_score":x.rank_score,"like_count":x.like_count,"view_count":x.view_count,"share_count":x.share_count,"ai_assisted":x.ai_assisted,"source":x.source,"webhook_delivery_status":webhook_delivery_status}
 
 def citation_row(data:CitationIn, story_id:int|None=None, slide_id:int|None=None, item_id:int|None=None, db:Session|None=None):
     if data.source_url and (urlparse(data.source_url).scheme != "https" or not urlparse(data.source_url).netloc):
@@ -231,7 +232,26 @@ def manage_feed_items(kind:str|None=None,status:str|None=None,limit:int=100,db:S
     q=select(FeedItem)
     if kind:q=q.where(FeedItem.kind==kind)
     if status:q=q.where(FeedItem.status==status)
-    return [item_json(item) for item in db.scalars(q.order_by(FeedItem.created_at.desc()).limit(min(max(limit,1),200))).all()]
+    items=db.scalars(q.order_by(FeedItem.created_at.desc()).limit(min(max(limit,1),200))).all()
+    if not items:return []
+    from ..models import WebhookOutbox
+    item_ids=[item.id for item in items]
+    deliveries=db.scalars(select(WebhookOutbox).where(WebhookOutbox.feed_item_id.in_(item_ids)).order_by(WebhookOutbox.created_at.desc(),WebhookOutbox.id.desc())).all()
+    status_by_item={}
+    for event in deliveries:
+        status_by_item.setdefault(event.feed_item_id,{"id":event.id,"state":event.state,"attempts":event.attempts,"last_error":event.last_error})
+    return [item_json(item,status_by_item.get(item.id)) for item in items]
+
+@router.delete("/feed/items/{item_id}", status_code=204)
+def delete_feed_item(item_id:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
+    item=db.get(FeedItem,item_id)
+    if not item:raise HTTPException(404,"Feed item not found")
+    if item.status=="published":raise HTTPException(409,"Published content cannot be deleted; unpublish it first")
+    if item.origin_draft_id:
+        draft=db.get(Draft,item.origin_draft_id)
+        if draft and draft.status=="published":raise HTTPException(409,"Published editorial content cannot be deleted")
+        if draft:db.delete(draft)
+    db.delete(item);db.commit()
 
 @router.get("/discovery/search")
 def discovery_search(q:str="",content_type:str|None=None,region:str|None=None,expedition_id:int|None=None,year_from:int|None=None,year_to:int|None=None,station:str|None=None,theme:str|None=None,page:int=1,page_size:int=20,db:Session=Depends(get_db)):
@@ -397,7 +417,11 @@ def feed_transition(item_id:int,data:dict,db:Session=Depends(get_db),u=Depends(c
     action=data.get("action");rules={"submit":({"draft","changes_requested"},{"admin","editor"},"in_review"),"approve":({"in_review"},{"admin","reviewer"},"approved"),"request_changes":({"in_review"},{"admin","reviewer"},"changes_requested"),"reject":({"in_review"},{"admin","reviewer"},"rejected"),"schedule":({"approved"},{"admin","editor"},"scheduled"),"publish":({"approved"},{"admin"},"published"),"unpublish":({"published"},{"admin"},"approved"),"archive":({"draft","changes_requested","approved","scheduled","published"},{"admin"},"archived")};r=rules.get(action)
     if not u or not r or x.status not in r[0] or u.role not in r[1]:raise HTTPException(409,"Transition not allowed")
     if action=="submit" and x.ai_assisted and not any(source.supported for source in x.sources):raise HTTPException(422,"AI-assisted posts need at least one citation with a validated source span before review")
-    x.status=r[2]
+    if action == "publish":
+        from .webhook import publish_feed_item
+        publish_feed_item(db, x)
+    else:
+        x.status=r[2]
     if action=="schedule":
         if not data.get("scheduled_at"):raise HTTPException(422,"scheduled_at required")
         try:x.scheduled_at=datetime.fromisoformat(data["scheduled_at"].replace("Z","+00:00"))
@@ -405,7 +429,7 @@ def feed_transition(item_id:int,data:dict,db:Session=Depends(get_db),u=Depends(c
         if x.scheduled_at.tzinfo is None or x.scheduled_at<=now():raise HTTPException(422,"scheduled_at must be a future date-time with a timezone")
     if action in {"approve","request_changes","reject"}:x.reviewer_id=u.id
     if action=="approve":x.approved_at=now()
-    if x.status=="published":x.published_at=now()
+    # publish handled above
     if action=="unpublish":x.published_at=None;x.scheduled_at=None
     x.updated_at=now()
     if x.origin_draft_id:

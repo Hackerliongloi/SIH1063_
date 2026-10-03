@@ -22,7 +22,19 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 async def lifespan(app):
     if settings.environment.lower()=="production" and (len(settings.secret_key)<32 or settings.secret_key.startswith("change-this") or settings.admin_password=="ChangeMe-Local-Only-123!"):
         raise RuntimeError("Set a random SECRET_KEY of at least 32 characters and ADMIN_PASSWORD before starting in production")
-    Base.metadata.create_all(bind=engine)
+    if settings.social_webhook_enabled:
+        from urllib.parse import urlparse
+        webhook_url=urlparse(settings.social_webhook_url)
+        if not webhook_url.hostname or (settings.environment.lower()=="production" and webhook_url.scheme!="https"):
+            raise RuntimeError("SOCIAL_WEBHOOK_ENABLED requires a valid webhook URL; production URLs must use HTTPS")
+        if settings.environment.lower()=="production" and len(settings.social_webhook_secret)<32:
+            raise RuntimeError("SOCIAL_WEBHOOK_SECRET must contain at least 32 characters when the webhook is enabled in production")
+    if settings.environment.lower()=="production" and not settings.public_app_url.startswith("https://"):
+        raise RuntimeError("PUBLIC_APP_URL must use HTTPS in production")
+    # Production schema is created exclusively by the Alembic migration in the
+    # container entrypoint; create_all remains a convenience for local development.
+    if settings.environment.lower() != "production":
+        Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         if not db.scalar(select(User).where(User.email==settings.admin_email.lower())):
             db.add(User(email=settings.admin_email.lower(), password_hash=hash_password(settings.admin_password), role="admin")); db.commit()
@@ -89,8 +101,31 @@ UPLOAD_EXTENSIONS={"pdf","docx","csv","nc","nc4","jpg","jpeg","png","webp","tif"
 IMAGE_EXTENSIONS={"jpg","jpeg","png","webp","tif","tiff"}
 SOCIAL_DRAFT_KINDS={"post","carousel","reel","instagram","twitter","facebook"}
 SOCIAL_FEED_KIND={"post":"post","carousel":"carousel","reel":"reel","instagram":"post","twitter":"post","facebook":"post"}
-def serialize_asset(a): return {"id":a.id,"type":a.type,"title":a.title,"description":a.description,"expedition_id":a.expedition_id,"expedition":a.expedition.name if a.expedition else None,"region":a.region,"station":a.station,"year":a.year,"file_key":a.file_key,"thumb_key":a.thumb_key,"external_url":a.external_url,"status":a.processing_status,"review_status":a.review_status,"error":a.error,"version":a.version,"metadata":a.metadata_json,"created_at":a.created_at.isoformat() if a.created_at else None}
-def serialize_draft(d): return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at,"public_story_id": d.id if d.kind == "article" else (d.outreach_stories[0].id if getattr(d, 'outreach_stories', None) and len(d.outreach_stories) > 0 else (d.feed_items[0].id if getattr(d, 'feed_items', None) and len(d.feed_items) > 0 else None))}
+def serialize_asset(a):
+    metadata=dict(a.metadata_json or {})
+    metadata.pop("_ingestion_job_id",None)
+    return {"id":a.id,"type":a.type,"title":a.title,"description":a.description,"expedition_id":a.expedition_id,"expedition":a.expedition.name if a.expedition else None,"region":a.region,"station":a.station,"year":a.year,"file_key":a.file_key,"thumb_key":a.thumb_key,"external_url":a.external_url,"status":a.processing_status,"review_status":a.review_status,"error":a.error,"version":a.version,"metadata":metadata,"created_at":a.created_at.isoformat() if a.created_at else None}
+def serialize_draft(d, webhook_delivery_status=None, query_webhook_status=True):
+    from sqlalchemy.orm import object_session
+    db = object_session(d)
+    public_story_id = d.id if d.kind == "article" else None
+    if db and public_story_id is None:
+        from .modules.feed import FeedItem, OutreachStory
+        from sqlalchemy import select
+        story = db.scalar(select(OutreachStory.id).where(OutreachStory.source_draft_id == d.id).limit(1))
+        if story is not None:
+            public_story_id = story
+        else:
+            public_story_id = db.scalar(select(FeedItem.id).where(FeedItem.origin_draft_id == d.id).limit(1))
+    if query_webhook_status and db and d.kind in SOCIAL_DRAFT_KINDS:
+        from .models import WebhookOutbox
+        from .modules.feed import FeedItem
+        from sqlalchemy import select
+        linked = db.scalar(select(FeedItem).where(FeedItem.origin_draft_id==d.id))
+        if linked:
+            outbox = db.scalar(select(WebhookOutbox).where(WebhookOutbox.feed_item_id==linked.id).order_by(WebhookOutbox.created_at.desc()))
+            if outbox: webhook_delivery_status = {"id": outbox.id, "state": outbox.state, "attempts": outbox.attempts, "last_error": outbox.last_error}
+    return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at,"public_story_id":public_story_id,"webhook_delivery_status":webhook_delivery_status}
 def serialize_public_draft(d,db):
     sources=[]
     for citation in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==d.id)):
@@ -146,7 +181,7 @@ def public_register(data:RegisterIn,request:Request,db:Session=Depends(get_db)):
     username = f"{base_name}_{suffix}"
     profile = PublicProfile(user_id=u.id, username=username, display_name=base_name)
     db.add(profile)
-    
+
     raw_token=secrets.token_urlsafe(32)
     token_hash=hashlib.sha256(raw_token.encode()).hexdigest()
     expires_at=datetime.now(timezone.utc)+timedelta(days=1)
@@ -263,24 +298,24 @@ def stream_storage_file(key: str, db:Session=Depends(get_db), u=Depends(current_
     if a and (a.processing_status != "ready" or a.review_status != "approved"):
         if not u or (a.created_by != u.id and u.role not in {"admin", "editor", "reviewer"}):
             raise HTTPException(403, "File is not public")
-            
+
     try:
         total = file_size(key)
     except Exception:
         raise HTTPException(404, "File not found")
     if total <= 0:
         raise HTTPException(404, "File is empty")
-    
+
     import mimetypes
     content_type, _ = mimetypes.guess_type(key)
     if not content_type:
         content_type = "application/octet-stream"
-        
+
     try:
         body = stream_file(key, 0, total - 1)
     except Exception:
         raise HTTPException(404, "File is unavailable")
-        
+
     return StreamingResponse(body, status_code=200, media_type=content_type, headers={"Cache-Control": "public, max-age=3600"})
 
 @app.get("/api/assets/{aid}/media")
@@ -322,9 +357,16 @@ def update_asset(aid:int,data:dict,db:Session=Depends(get_db),u=Depends(require_
         if k in allowed: setattr(a,k,v)
     a.version+=1;a.updated_at=now();db.add(AssetVersion(asset_id=a.id,version=a.version,snapshot_json=serialize_asset(a)));db.commit();db.refresh(a);return serialize_asset(a)
 @app.delete("/api/assets/{aid}",status_code=204)
-def delete_asset(aid:int,db:Session=Depends(get_db),u=Depends(require_roles("admin"))):
+def delete_asset(aid:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     a=db.get(Asset,aid)
     if not a: raise HTTPException(404,"Asset not found")
+    from .modules.feed import FeedItem, FeedMedia
+    linked_public = db.scalar(select(FeedItem.id).outerjoin(FeedMedia, FeedMedia.item_id==FeedItem.id).where(FeedItem.status=="published", or_(FeedItem.primary_asset_id==aid, FeedMedia.asset_id==aid)).limit(1))
+    from .modules.feed import OutreachStory, StorySlide
+    linked_story = db.scalar(select(OutreachStory.id).join(StorySlide, StorySlide.story_id==OutreachStory.id).where(OutreachStory.status=="published", StorySlide.asset_id==aid).limit(1))
+    linked_article = db.scalar(select(Draft.id).join(DraftCitation, DraftCitation.draft_id==Draft.id).where(Draft.status=="published", DraftCitation.asset_id==aid).limit(1))
+    if linked_public or linked_story or linked_article:
+        raise HTTPException(409,"This asset is cited by or attached to published content; unpublish or remove that content before deleting it")
     db.delete(a);db.commit()
 @app.post("/api/ingest/upload",status_code=202)
 async def upload(file:UploadFile=File(...),title:str=Form(...),type:str=Form("report"),description:str=Form(""),expedition_id:int|None=Form(None),station:str|None=Form(None),region:str|None=Form(None),year:int|None=Form(None),db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
@@ -339,29 +381,38 @@ async def upload(file:UploadFile=File(...),title:str=Form(...),type:str=Form("re
     key=store_file(data,suffix,file.content_type or "application/octet-stream")
     a=Asset(type=type,title=title,description=description,expedition_id=expedition_id,station=station,region=region,year=year,file_key=key,processing_status="processing",review_status="approved",created_by=u.id,metadata_json={"filename":file.filename,"content_type":file.content_type,"size":len(data)})
     db.add(a);db.commit();db.refresh(a)
-    queued=enqueue_ingestion(a.id,key,suffix)
-    if not queued:
+    ingestion_job_id=enqueue_ingestion(a.id,key,suffix)
+    queued=bool(ingestion_job_id)
+    if queued:
+        a.metadata_json={**(a.metadata_json or {}),"_ingestion_job_id":ingestion_job_id}
+        db.commit()
+    else:
         try:
             text=extract_text(data,suffix)
             if text:
                 for i in range(0,len(text),2500):
                     chunk_text=text[i:i+3000]
                     db.add(Chunk(asset_id=a.id,idx=i//2500,text=chunk_text,embedding=embed(chunk_text)))
-            a.processing_status="ready";db.commit()
-        except Exception as e: a.processing_status="failed";a.error=str(e)[:1000];db.commit()
+            a.processing_status="ready";a.error=None;a.updated_at=now();db.commit()
+        except Exception as e:
+            db.rollback();a=db.get(Asset,a.id)
+            if a:a.processing_status="failed";a.error=str(e)[:1000];a.updated_at=now();db.commit()
     return {"asset":serialize_asset(a),"job_queued":queued}
 @app.get("/api/ingest/failed")
 def failed_ingestion(db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     return [serialize_asset(a) for a in db.scalars(select(Asset).where(Asset.processing_status=="failed").order_by(Asset.updated_at.desc()))]
 @app.post("/api/ingest/{asset_id}/retry",status_code=202)
 def retry_ingestion(asset_id:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
-    a=db.get(Asset,asset_id)
-    if not a or a.processing_status!="failed":raise HTTPException(404,"Failed asset not found")
+    a=db.scalar(select(Asset).where(Asset.id==asset_id).with_for_update().execution_options(populate_existing=True))
+    if not a:raise HTTPException(404,"Asset not found")
+    if a.processing_status!="failed":raise HTTPException(409,"Only failed assets can be retried")
     if not a.file_key:raise HTTPException(422,"Asset has no source file")
     suffix=(a.metadata_json or {}).get("filename","").lower().rsplit(".",1)[-1]
-    a.processing_status="processing";a.error=None;db.commit()
-    if not enqueue_ingestion(a.id,a.file_key,suffix):
+    a.processing_status="processing";a.error=None;a.updated_at=now();db.commit()
+    ingestion_job_id=enqueue_ingestion(a.id,a.file_key,suffix)
+    if not ingestion_job_id:
         a.processing_status="failed";a.error="Redis/RQ unavailable; start the worker before retrying";db.commit();raise HTTPException(503,a.error)
+    a.metadata_json={**(a.metadata_json or {}),"_ingestion_job_id":ingestion_job_id};db.commit()
     return {"asset_id":a.id,"status":a.processing_status,"review_status":a.review_status,"queued":True}
 
 @app.get("/api/search")
@@ -419,7 +470,22 @@ def drafts(status:str|None=None,kind:str|None=None,db:Session=Depends(get_db),u=
     q=select(Draft)
     if status:q=q.where(Draft.status==status)
     if kind:q=q.where(Draft.kind==kind)
-    return [serialize_draft(x) for x in db.scalars(q.order_by(Draft.created_at.desc()))]
+    rows=db.scalars(q.order_by(Draft.created_at.desc())).all()
+    social_ids=[draft.id for draft in rows if draft.kind in SOCIAL_DRAFT_KINDS]
+    status_by_draft={}
+    if social_ids:
+        from .modules.feed import FeedItem
+        from .models import WebhookOutbox
+        links=db.execute(select(FeedItem.origin_draft_id,FeedItem.id).where(FeedItem.origin_draft_id.in_(social_ids))).all()
+        feed_ids=[feed_id for _,feed_id in links]
+        if feed_ids:
+            deliveries=db.scalars(select(WebhookOutbox).where(WebhookOutbox.feed_item_id.in_(feed_ids)).order_by(WebhookOutbox.created_at.desc(),WebhookOutbox.id.desc())).all()
+            draft_by_feed={feed_id:draft_id for draft_id,feed_id in links}
+            for event in deliveries:
+                draft_id=draft_by_feed.get(event.feed_item_id)
+                if draft_id is not None:
+                    status_by_draft.setdefault(draft_id,{"id":event.id,"state":event.state,"attempts":event.attempts,"last_error":event.last_error})
+    return [serialize_draft(draft,status_by_draft.get(draft.id),query_webhook_status=False) for draft in rows]
 @app.post("/api/editorial/drafts",status_code=201)
 def create_draft(data:DraftIn,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     d=Draft(**data.model_dump(),created_by=u.id);db.add(d);db.commit();db.refresh(d);return serialize_draft(d)
@@ -428,6 +494,23 @@ def draft_detail(did:int,db:Session=Depends(get_db),u=Depends(require_roles("adm
     d=db.get(Draft,did)
     if not d:raise HTTPException(404,"Draft not found")
     return {**serialize_draft(d),"citations":[{"claim_text":c.claim_text,"chunk_id":c.chunk_id,"asset_id":c.asset_id,"span_text":c.span_text,"supported":c.supported} for c in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==did))],"comments":[{"author_id":c.author_id,"body":c.body,"action":c.action,"created_at":c.created_at} for c in db.scalars(select(DraftComment).where(DraftComment.draft_id==did))]}
+@app.delete("/api/editorial/drafts/{did}",status_code=204)
+def delete_draft(did:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
+    d=db.get(Draft,did)
+    if not d:raise HTTPException(404,"Draft not found")
+    from .modules.feed import FeedItem, OutreachStory
+    linked_item=db.scalar(select(FeedItem).where(FeedItem.origin_draft_id==did))
+    linked_story=db.scalar(select(OutreachStory).where(OutreachStory.source_draft_id==did))
+    if d.status=="published" or (linked_item and linked_item.status=="published") or (linked_story and linked_story.status=="published"):
+        raise HTTPException(409,"Published content cannot be deleted; unpublish it first")
+    if linked_item:db.delete(linked_item)
+    if linked_story:db.delete(linked_story)
+    db.delete(d);db.commit()
+@app.post("/api/webhooks/outbox/{event_id}/retry")
+def retry_webhook_delivery(event_id:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):
+    from .modules.webhook import retry_webhook_event
+    if not retry_webhook_event(db,event_id):raise HTTPException(409,"Webhook event is missing or is not in dead-letter state")
+    return {"state":"pending"}
 @app.post("/api/editorial/drafts/{did}/comments",status_code=201)
 def add_draft_comment(did:int,data:EditorialCommentIn,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):
     d=db.get(Draft,did)
@@ -464,10 +547,14 @@ def transition(did:int,data:TransitionIn,db:Session=Depends(get_db),u=Depends(cu
         linked_item=db.scalar(select(FeedItem).where(FeedItem.origin_draft_id==did))
         if linked_item and linked_item.status in {"draft","changes_requested","in_review","approved","scheduled","published","archived"}:
             linked_item.kind=SOCIAL_FEED_KIND.get(d.kind,linked_item.kind)
-            linked_item.status=linked_states[data.action];linked_item.updated_at=now()
+            if data.action == "publish":
+                from .modules.webhook import publish_feed_item
+                publish_feed_item(db, linked_item)
+            else:
+                linked_item.status=linked_states[data.action];linked_item.updated_at=now()
             if data.action in {"approve","request_changes","reject"}:linked_item.reviewer_id=u.id
             if data.action=="approve":linked_item.approved_at=now()
-            if data.action=="publish":linked_item.published_at=now()
+            # publish handled above
             if data.action=="schedule":
                 linked_item.scheduled_at=d.scheduled_at;linked_item.published_at=None
             if data.action in {"unpublish","unschedule"}:linked_item.published_at=None;linked_item.scheduled_at=None
@@ -607,14 +694,14 @@ def get_submitter_dataset(id:int,db:Session=Depends(get_db),u=Depends(require_ro
     a = db.get(Asset, id)
     if not a: raise HTTPException(404, "Asset not found")
     if a.created_by != u.id and u.role not in {"admin", "editor"}: raise HTTPException(403, "Not authorized")
-    
+
     chunks = db.scalars(select(Chunk).where(Chunk.asset_id == id).order_by(Chunk.idx, Chunk.id)).all()
     versions = db.scalars(select(AssetVersion).where(AssetVersion.asset_id == id).order_by(AssetVersion.version.desc())).all()
     expedition = {"id":a.expedition.id,"name":a.expedition.name,"stations":a.expedition.stations or []} if a.expedition else None
     version_rows = [{"version":row.version,"timestamp":row.created_at.isoformat() if row.created_at else None,"title":row.snapshot_json.get("title",a.title)} for row in versions]
     if not version_rows:
         version_rows = [{"version":a.version,"timestamp":a.updated_at.isoformat() if a.updated_at else None,"title":a.title}]
-        
+
     return {"asset":serialize_asset(a),"chunks":[{"id":chunk.id,"page":chunk.page,"text":chunk.text} for chunk in chunks],"versions":version_rows,"expedition":expedition}
 
 @app.post("/api/datasets", status_code=201)
@@ -638,7 +725,7 @@ async def upload_dataset_file(id:int,file:UploadFile=File(...),db:Session=Depend
     if not a: raise HTTPException(404, "Asset not found")
     if a.created_by != u.id and u.role not in {"admin", "editor"}: raise HTTPException(403, "Not authorized")
     if a.review_status not in {"draft", "rejected"} and a.processing_status != "failed": raise HTTPException(400, "Can only upload to draft, rejected or failed datasets")
-    
+
     suffix=(file.filename or "").lower().rsplit(".",1)[-1] if "." in (file.filename or "") else ""
     if suffix not in UPLOAD_EXTENSIONS: raise HTTPException(415,"Unsupported file extension")
     if a.type=="photo" and suffix not in IMAGE_EXTENSIONS:
@@ -653,24 +740,31 @@ async def upload_dataset_file(id:int,file:UploadFile=File(...),db:Session=Depend
     a.metadata_json = dict(a.metadata_json or {})
     a.metadata_json.update({"filename":file.filename,"content_type":file.content_type,"size":len(data)})
     db.commit()
-    queued=enqueue_ingestion(a.id,key,suffix)
-    if not queued:
+    ingestion_job_id=enqueue_ingestion(a.id,key,suffix)
+    queued=bool(ingestion_job_id)
+    if queued:
+        a.metadata_json={**(a.metadata_json or {}),"_ingestion_job_id":ingestion_job_id}
+        db.commit()
+    else:
         try:
             text=extract_text(data,suffix)
             if text:
                 for i in range(0,len(text),2500):
                     chunk_text=text[i:i+3000]
                     db.add(Chunk(asset_id=a.id,idx=i//2500,text=chunk_text,embedding=embed(chunk_text)))
-            # When upload finishes inline, state returns to draft for submitters to review before submitting
-            a.review_status="draft";db.commit()
-        except Exception as e: a.processing_status="failed";a.error=str(e)[:1000];db.commit()
+            # Even formats without extractable text (for example some media files)
+            # completed ingestion successfully and must not remain in "processing".
+            a.processing_status="ready";a.review_status="draft";a.error=None;a.updated_at=now();db.commit()
+        except Exception as e:
+            db.rollback();a=db.get(Asset,id)
+            if a:a.processing_status="failed";a.error=str(e)[:1000];a.updated_at=now();db.commit()
     return {"asset":serialize_asset(a),"job_queued":queued}
 
 @app.post("/api/datasets/{id}/transition")
 def transition_dataset(id:int,data:TransitionIn,db:Session=Depends(get_db),u=Depends(require_roles("submitter","admin","editor","reviewer"))):
     a = db.get(Asset, id)
     if not a: raise HTTPException(404, "Asset not found")
-    
+
     rules={
         "submit": ({"draft", "rejected"}, {"submitter", "admin", "editor"}, "in_review"),
         "approve": ({"in_review"}, {"admin", "reviewer"}, "approved"),
@@ -681,11 +775,11 @@ def transition_dataset(id:int,data:TransitionIn,db:Session=Depends(get_db),u=Dep
     if not rule or a.review_status not in rule[0] or u.role not in rule[1]: raise HTTPException(409, "Transition not allowed for this state or role")
     if data.action == "submit" and a.created_by != u.id and u.role not in {"admin", "editor"}: raise HTTPException(403, "Not authorized to submit")
     if data.action == "request_changes" and not data.comment.strip(): raise HTTPException(422, "Comment is required when requesting changes")
-    
+
     from_status = a.review_status
     a.review_status = rule[2]
     a.updated_at = now()
-    
+
     db.add(AssetReviewHistory(
         asset_id=a.id,
         actor_id=u.id,
@@ -704,13 +798,13 @@ def export_asset_xml(id:int, db:Session=Depends(get_db)):
     from xml.sax.saxutils import escape
     a = db.get(Asset, id)
     if not a or (a.processing_status!="ready" or a.review_status!="approved"): raise HTTPException(404, "Asset not found")
-    
+
     title = escape(a.title or "")
     description = escape(a.description or "")
     region = escape(a.region or "")
     station = escape(a.station or "")
     year_str = escape(str(a.year) if a.year else "")
-    
+
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <MD_Metadata xmlns="http://www.isotc211.org/2005/gmd" xmlns:gco="http://www.isotc211.org/2005/gco">
     <fileIdentifier><gco:CharacterString>{a.id}</gco:CharacterString></fileIdentifier>
@@ -743,47 +837,115 @@ def export_asset_xml(id:int, db:Session=Depends(get_db)):
 def export_asset_pdf(id:int, db:Session=Depends(get_db)):
     from fastapi.responses import Response
     from fpdf import FPDF
-    
+
     a = db.get(Asset, id)
     if not a or (a.processing_status!="ready" or a.review_status!="approved"): raise HTTPException(404, "Asset not found")
-    
+
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("helvetica", "B", 16)
     pdf.cell(0, 10, "National Polar Data Center - Dataset Metadata", ln=True, align="C")
     pdf.ln(10)
-    
+
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(40, 10, "Title:")
     pdf.set_font("helvetica", "", 12)
     pdf.multi_cell(0, 10, a.title or "N/A")
-    
+
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(40, 10, "Type:")
     pdf.set_font("helvetica", "", 12)
     pdf.cell(0, 10, a.type or "N/A", ln=True)
-    
+
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(40, 10, "Region:")
     pdf.set_font("helvetica", "", 12)
     pdf.cell(0, 10, a.region or "N/A", ln=True)
-    
+
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(40, 10, "Year:")
     pdf.set_font("helvetica", "", 12)
     pdf.cell(0, 10, str(a.year) if a.year else "N/A", ln=True)
-    
+
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(40, 10, "Station:")
     pdf.set_font("helvetica", "", 12)
     pdf.cell(0, 10, a.station or "N/A", ln=True)
-    
+
     pdf.ln(10)
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(0, 10, "Description:", ln=True)
     pdf.set_font("helvetica", "", 12)
     pdf.multi_cell(0, 10, (a.description or "N/A").encode("latin-1", "replace").decode("latin-1"))
-    
+
     pdf_bytes = pdf.output()
     safe_id = "".join(c for c in str(a.id) if c.isalnum())
     return Response(content=pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=dataset_{safe_id}.pdf"})
+
+def stream_public_asset(a: Asset, request: Request):
+    key = a.file_key
+    if not key: raise HTTPException(404, "No file key")
+    try: total = file_size(key)
+    except Exception: raise HTTPException(404, "File not found")
+    if total <= 0: raise HTTPException(404, "File is empty")
+
+    import mimetypes
+    content_type, _ = mimetypes.guess_type(key)
+    if not content_type: content_type = "application/octet-stream"
+
+    start, end = 0, total - 1
+    status = 200
+    requested = request.headers.get("range")
+    if requested:
+        match=re.fullmatch(r"bytes=(\d*)-(\d*)",requested.strip())
+        if not match or (not match.group(1) and not match.group(2)):
+            raise HTTPException(416,"Invalid byte range",headers={"Content-Range":f"bytes */{total}"})
+        if match.group(1):
+            start=int(match.group(1));end=int(match.group(2)) if match.group(2) else total-1
+        else:
+            start=max(total-int(match.group(2)),0)
+        if start>=total or end<start:
+            raise HTTPException(416,"Requested byte range is not satisfiable",headers={"Content-Range":f"bytes */{total}"})
+        end=min(end,total-1);status=206
+
+    try: body = stream_file(key, start, end)
+    except Exception: raise HTTPException(404, "File is unavailable")
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(end - start + 1),
+        "Cache-Control": "public, max-age=3600"
+    }
+    if status==206:headers["Content-Range"]=f"bytes {start}-{end}/{total}"
+    return StreamingResponse(body, status_code=status, media_type=content_type, headers=headers)
+
+@app.get("/api/public/feed/{item_id}/media/{media_id}")
+def public_feed_media(item_id: int, media_id: int, request: Request, db: Session = Depends(get_db)):
+    from .modules.feed import FeedItem, FeedMedia
+    item = db.get(FeedItem, item_id)
+    if not item or item.status != "published":
+        raise HTTPException(404, "Feed item not found")
+    media = db.get(FeedMedia, media_id)
+    if not media or media.item_id != item_id or not media.asset:
+        raise HTTPException(404, "Media not found")
+
+    a = media.asset
+    if a.processing_status != "ready" or a.review_status != "approved":
+        raise HTTPException(404, "Media asset unavailable")
+
+    return stream_public_asset(a, request)
+
+@app.get("/api/public/feed/{item_id}/asset/{asset_id}")
+def public_feed_asset(item_id: int, asset_id: int, request: Request, db: Session = Depends(get_db)):
+    from .modules.feed import FeedItem
+    item = db.get(FeedItem, item_id)
+    if not item or item.status != "published":
+        raise HTTPException(404, "Feed item not found")
+    if item.primary_asset_id != asset_id:
+        raise HTTPException(404, "Media not found")
+
+    a = db.get(Asset, asset_id)
+    if not a or a.processing_status != "ready" or a.review_status != "approved":
+        raise HTTPException(404, "Media asset unavailable")
+
+    return stream_public_asset(a, request)

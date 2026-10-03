@@ -1,4 +1,4 @@
-import hashlib, logging, os
+import hashlib, logging, os, uuid
 from pathlib import Path
 from .core.config import settings
 
@@ -86,16 +86,17 @@ def generate_video_poster(file_data: bytes, suffix: str) -> bytes | None:
         logging.warning("Video poster generation failed: %s", e)
     return None
 
-def enqueue_ingestion(asset_id:int,key:str,suffix:str)->bool:
+def enqueue_ingestion(asset_id:int,key:str,suffix:str)->str|None:
     try:
         from redis import Redis
         from rq import Queue
         from rq import Retry
+        job_id=f"polar-ingest-{asset_id}-{uuid.uuid4().hex}"
         q=Queue("ingestion",connection=Redis.from_url(settings.redis_url))
-        q.enqueue("app.worker.process_asset",asset_id,key,suffix,retry=Retry(max=3,interval=[30,120,300]),job_timeout="30m",result_ttl=86400, failure_ttl=604800)
-        return True
+        q.enqueue("app.worker.process_asset",asset_id,key,suffix,job_id=job_id,retry=Retry(max=3,interval=[30,120,300]),job_timeout="30m",result_ttl=86400, failure_ttl=604800)
+        return job_id
     except Exception as e:
-        logging.info("RQ unavailable; running ingestion inline: %s",e);return False
+        logging.warning("Could not enqueue asset %s for ingestion: %s",asset_id,e);return None
 
 def send_activation_email(to_email: str, token: str) -> bool:
     if not settings.smtp_host:
