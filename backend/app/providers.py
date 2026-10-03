@@ -46,19 +46,19 @@ _DRAFT_SCHEMA = {
 }
 
 
-def generate_locally(model: str, base_url: str, context: list[dict], kind: str, tone: str, theme: str = "") -> dict:
-    prompt = _generation_prompt(context, kind, tone, theme)
-    response = httpx.post(
-        base_url.rstrip("/") + "/api/generate",
-        json={"model": model, "prompt": prompt, "stream": False, "format": "json", "options": {"temperature": 0.2}},
-        timeout=180,
-    )
-    response.raise_for_status()
-    result = json.loads(response.json()["response"])
-    return _validate_generation(result, context)
+def generate_locally(model: str, base_url: str, context: list[dict], kind: str, tone: str, theme: str = "", audience: str = "general public", reading_level: str = "plain_language", max_length: int = 1000, key_messages: str = "") -> dict:
+    prompt = _generation_prompt(context, kind, tone, theme, audience, reading_level, max_length, key_messages)
+    for attempt in range(2):
+        response = httpx.post(base_url.rstrip("/") + "/api/generate", json={"model": model, "prompt": prompt, "stream": False, "format": "json", "options": {"temperature": 0.2}}, timeout=180)
+        response.raise_for_status()
+        result = json.loads(response.json()["response"])
+        try: return _validate_generation(result, context, max_length)
+        except ValueError as exc:
+            if attempt: raise
+            prompt += f"\n\nCORRECTION: Regenerate within a total body limit of {max_length} characters and use only exact cited source spans."
 
 
-def generate_openrouter(model: str, api_key: str, context: list[dict], kind: str, tone: str, theme: str = "") -> dict:
+def generate_openrouter(model: str, api_key: str, context: list[dict], kind: str, tone: str, theme: str = "", audience: str = "general public", reading_level: str = "plain_language", max_length: int = 1000, key_messages: str = "") -> dict:
     """Generate a cited draft through OpenRouter's OpenAI-compatible API.
 
     Parses the response envelope defensively, distinguishing between:
@@ -80,7 +80,7 @@ def generate_openrouter(model: str, api_key: str, context: list[dict], kind: str
             "(e.g. 'meta-llama/llama-3.1-8b-instruct:free' or 'google/gemini-flash-1.5')."
         )
 
-    prompt = _generation_prompt(context, kind, tone, theme)
+    prompt = _generation_prompt(context, kind, tone, theme, audience, reading_level, max_length, key_messages)
 
     def _call_openrouter(instructions: str) -> dict:
         """Make one OpenRouter API call and return the parsed JSON dict.
@@ -257,9 +257,9 @@ def generate_openrouter(model: str, api_key: str, context: list[dict], kind: str
     # First attempt
     result = _call_openrouter(prompt)
     try:
-        return _validate_generation(result, context)
+        return _validate_generation(result, context, max_length)
     except ValueError as exc:
-        if "exact source citation" not in str(exc):
+        if "exact source citation" not in str(exc) and "maximum length" not in str(exc):
             raise  # Not a citation error — do not retry
 
     # Single bounded retry for citation validation failures only
@@ -267,19 +267,21 @@ def generate_openrouter(model: str, api_key: str, context: list[dict], kind: str
         prompt
         + "\n\nCORRECTION: The previous draft failed because a citation quote did not exactly match its source. "
         "Regenerate the complete draft. For every paragraph, choose a chunk_id from the supplied chunks and copy its span "
-        "verbatim, character-for-character, from that chunk. Keep each span short (one complete source sentence). "
-        "Do not paraphrase, edit, or add punctuation to a span. Keep the paragraph itself limited to facts supported by that quote."
+        f"verbatim, character-for-character, from that chunk. Keep each span short and the complete body at or below {max_length} characters. "
+        "Do not paraphrase, edit, or add punctuation to a span. Keep every statement factual and supported."
     )
-    return _validate_generation(_call_openrouter(correction), context)
+    return _validate_generation(_call_openrouter(correction), context, max_length)
 
 
-def _generation_prompt(context: list[dict], kind: str, tone: str, theme: str) -> str:
+def _generation_prompt(context: list[dict], kind: str, tone: str, theme: str, audience: str = "general public", reading_level: str = "plain_language", max_length: int = 1000, key_messages: str = "") -> str:
     sources = "\n\n".join(
         f"CHUNK {row['chunk_id']} | SOURCE {row['asset_title']}\n{row['text']}" for row in context
     )
     return (
-        f"Create a {kind} for a polar science outreach portal in a {tone} tone. "
-        f"Topic: {theme or 'selected polar science sources'}.\n"
+        f"Create a {kind} for a polar science outreach portal in a {tone} tone for this target audience: {audience}. "
+        f"Use this reading level: {reading_level}. Topic: {theme or 'selected polar science sources'}. "
+        f"The complete generated body including headings must not exceed {max_length} characters. "
+        f"Key messages to prioritize if supported by sources: {key_messages or 'none supplied'}.\n"
         f'Use only the source chunks below. Return only valid JSON with this exact shape: '
         f'{{"title":"...","sections":[{{"heading":"...","paragraphs":[{{"text":"...","citations":[{{"chunk_id":123,"span":"an exact substring from that chunk"}}]}}]}}]}}.\n'
         f"Every factual paragraph must have at least one citation. Each span must be copied exactly from its cited chunk. "
@@ -288,7 +290,7 @@ def _generation_prompt(context: list[dict], kind: str, tone: str, theme: str) ->
     )
 
 
-def _validate_generation(result: dict, context: list[dict]) -> dict:
+def _validate_generation(result: dict, context: list[dict], max_length: int = 0) -> dict:
     if (
         not isinstance(result, dict)
         or not isinstance(result.get("title"), str)
@@ -331,4 +333,6 @@ def _validate_generation(result: dict, context: list[dict]) -> dict:
         )
         for section in result["sections"]
     )
+    if max_length and len(body)>max_length:
+        raise ValueError(f"Generated body exceeds the requested maximum length of {max_length} characters")
     return {"title": result["title"], "body_md": body, "citations": validated}

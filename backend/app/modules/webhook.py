@@ -25,11 +25,11 @@ def build_webhook_payload(item) -> dict:
     media_list = []
     for media in item.media:
         asset = media.asset
-        if not asset:
+        if not asset or asset.access_level!="public":
             continue
         url = asset.external_url or _public_url(f"/api/public/feed/{item.id}/media/{media.id}")
         media_list.append({"kind": media.kind, "url": url, "alt_text": media.alt_text})
-    if not media_list and item.primary_asset:
+    if not media_list and item.primary_asset and item.primary_asset.access_level=="public":
         asset = item.primary_asset
         if asset.type in {"photo", "video", "image"}:
             url = asset.external_url or _public_url(f"/api/public/feed/{item.id}/asset/{asset.id}")

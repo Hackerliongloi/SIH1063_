@@ -21,7 +21,7 @@ import { api } from "@/lib/api";
 type StudioAsset = { id: string | number; title: string; type?: string; region?: string; year?: string | number; review_status?: string; chunk_count?: number };
 type StudioExpedition = { id: string | number; name: string };
 type StudioCitation = { chunk_id?: string | number; claim_text?: string; span_text?: string };
-type GeneratedDraft = { id: string | number; kind: string; tone?: string; title: string; body_md: string; citations?: StudioCitation[] };
+type GeneratedDraft = { id: string | number; kind: string; tone?: string; audience?: string; reading_level?: string; max_length?: number; title: string; body_md: string; citations?: StudioCitation[] };
 
 function GenerateStudioContent() {
   const searchParams = useSearchParams();
@@ -35,6 +35,11 @@ function GenerateStudioContent() {
   const [selectedExpeditionId, setSelectedExpeditionId] = useState("");
   const [generationTheme, setGenerationTheme] = useState("");
   const [selectedTone, setSelectedTone] = useState("general_public");
+  const [audience, setAudience] = useState("general public");
+  const [customAudience, setCustomAudience] = useState("");
+  const [readingLevel, setReadingLevel] = useState("plain_language");
+  const [maxLength, setMaxLength] = useState(1000);
+  const [keyMessages, setKeyMessages] = useState("");
   const [selectedFormats, setSelectedFormats] = useState<string[]>([
     "post",
   ]);
@@ -98,6 +103,10 @@ function GenerateStudioContent() {
         theme: generationTheme.trim() || undefined,
         formats: selectedFormats,
         tone: selectedTone,
+        audience: audience === "custom" ? customAudience.trim() : audience,
+        reading_level: readingLevel,
+        max_length: maxLength,
+        key_messages: keyMessages.trim(),
       });
       if (!drafts.length) throw new Error("The service returned no drafts. Check that the chosen records contain indexed source text.");
       setGeneratedDrafts(drafts as GeneratedDraft[]);
@@ -216,6 +225,13 @@ function GenerateStudioContent() {
                 ))}
               </div>
             </div>
+
+            {/* Expedition Filter (optional) */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-2"><label htmlFor="target-audience" className="block text-xs font-mono text-slate-600">Target audience</label><select id="target-audience" value={audience} onChange={(event) => setAudience(event.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700"><option value="general public">General public</option><option value="school students">School students</option><option value="researchers">Researchers</option><option value="policy makers">Policy makers</option><option value="custom">Other / custom</option></select>{audience === "custom" && <input aria-label="Custom target audience" value={customAudience} onChange={(event) => setCustomAudience(event.target.value)} placeholder="Describe audience" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs" />}</div>
+              <div className="space-y-2"><label htmlFor="reading-level" className="block text-xs font-mono text-slate-600">Reading level</label><select id="reading-level" value={readingLevel} onChange={(event) => setReadingLevel(event.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs"><option value="plain_language">Plain language</option><option value="school">School level</option><option value="general">General adult</option><option value="technical">Technical</option></select></div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><div className="space-y-2"><label htmlFor="max-length" className="block text-xs font-mono text-slate-600">Maximum body length (characters)</label><input id="max-length" type="number" min={100} max={5000} value={maxLength} onChange={(event) => setMaxLength(Math.min(5000, Math.max(100, Number(event.target.value))))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" /></div><div className="space-y-2"><label htmlFor="key-messages" className="block text-xs font-mono text-slate-600">Key messages (optional)</label><input id="key-messages" value={keyMessages} onChange={(event) => setKeyMessages(event.target.value.slice(0,2000))} maxLength={2000} placeholder="Priorities supported by sources" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" /></div></div>
 
             {/* Expedition Filter (optional) */}
             <div className="space-y-2">
@@ -352,7 +368,7 @@ function GenerateStudioContent() {
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     Verified Citations: {activeDraft.citations?.length || 0}
                   </span>
-                  <span>Tone: {activeDraft.tone}</span>
+                  <span>{activeDraft.tone} tone · {activeDraft.audience} · {activeDraft.reading_level?.replaceAll("_", " ")} · {activeDraft.body_md.length}/{activeDraft.max_length} chars</span>
                 </div>
 
                 <h3 className="text-xl font-bold text-[#143b5e] tracking-tight">

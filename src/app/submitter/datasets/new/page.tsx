@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LoaderCircle } from "lucide-react";
+import { api } from "@/lib/api";
 
 const submissionTypes = [
   { value: "dataset", label: "Scientific dataset" },
@@ -21,9 +22,20 @@ export default function NewDatasetPage() {
   const [description, setDescription] = useState("");
   const [region, setRegion] = useState("Antarctica");
   const [station, setStation] = useState("");
+  const [expeditionId, setExpeditionId] = useState("");
+  const [expeditions, setExpeditions] = useState<{ id: string | number; name: string }[]>([]);
   const [year, setYear] = useState(new Date().getFullYear());
+  const [recordDate, setRecordDate] = useState("");
+  const [authors, setAuthors] = useState("");
+  const [tags, setTags] = useState("");
+  const [accessLevel, setAccessLevel] = useState("internal");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [reportNumber, setReportNumber] = useState("");
+  const [photoCredit, setPhotoCredit] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => { api.getLiveExpeditions().then((rows) => { if (Array.isArray(rows)) setExpeditions(rows as { id: string | number; name: string }[]); }).catch(() => setExpeditions([])); }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,10 +51,16 @@ export default function NewDatasetPage() {
           title,
           description,
           region,
+          expedition_id: expeditionId || null,
           station: station || null,
           year,
-          tags: [],
-          metadata: {}
+          record_date: recordDate || null,
+          authors: authors.split(",").map((value) => value.trim()).filter(Boolean),
+          access_level: accessLevel,
+          external_url: sourceUrl.trim() || null,
+          tags: tags.split(",").map((value) => value.trim()).filter(Boolean),
+          type_details: type === "report" ? { report_number: reportNumber } : type === "photo" ? { photographer: photoCredit } : {},
+          metadata: {},
         })
       });
       
@@ -59,7 +77,7 @@ export default function NewDatasetPage() {
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <h1 className="text-2xl font-bold text-[#143b5e]">New Submission</h1>
-      <p className="mt-1 text-sm text-slate-500">Choose what you are submitting, add its metadata, then upload the file in the next step.</p>
+      <p className="mt-1 text-sm text-slate-500">Add repository metadata and attach a file now or provide a public HTTPS source link. You can also upload a file on the next screen.</p>
       
       <form onSubmit={handleSubmit} className="mt-8 space-y-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div>
@@ -68,6 +86,16 @@ export default function NewDatasetPage() {
             {submissionTypes.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </div>
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+          <div><label className="mb-2 block text-sm font-semibold text-slate-700">Record date</label><input type="date" value={recordDate} onChange={e => setRecordDate(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" /></div>
+          <div><label className="mb-2 block text-sm font-semibold text-slate-700">Access level</label><select value={accessLevel} onChange={e => setAccessLevel(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2"><option value="internal">Internal</option><option value="public">Public after approval</option></select><p className="mt-1 text-xs text-slate-500">Public records are still hidden until editorial approval.</p></div>
+        </div>
+        <div><label className="mb-2 block text-sm font-semibold text-slate-700">Expedition</label><select value={expeditionId} onChange={e => setExpeditionId(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2"><option value="">No specific expedition</option>{expeditions.map((expedition) => <option key={expedition.id} value={expedition.id}>{expedition.name}</option>)}</select></div>
+        <div><label className="mb-2 block text-sm font-semibold text-slate-700">Author(s), comma separated</label><input value={authors} onChange={e => setAuthors(e.target.value)} placeholder="Researcher names" className="w-full rounded-lg border border-slate-300 px-3 py-2" /></div>
+        <div><label className="mb-2 block text-sm font-semibold text-slate-700">Tags / keywords, comma separated</label><input value={tags} onChange={e => setTags(e.target.value)} placeholder="sea ice, climate, oceanography" className="w-full rounded-lg border border-slate-300 px-3 py-2" /></div>
+        {type === "report" && <div><label className="mb-2 block text-sm font-semibold text-slate-700">Report number (optional)</label><input value={reportNumber} onChange={e => setReportNumber(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" /></div>}
+        {type === "photo" && <div><label className="mb-2 block text-sm font-semibold text-slate-700">Photographer / image credit (optional)</label><input value={photoCredit} onChange={e => setPhotoCredit(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2" /></div>}
+        <div><label className="mb-2 block text-sm font-semibold text-slate-700">Existing source link (optional; HTTPS)</label><input type="url" value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="https://..." className="w-full rounded-lg border border-slate-300 px-3 py-2" /></div>
 
         <div>
           <label htmlFor="submission-title" className="mb-2 block text-sm font-semibold text-slate-700">Title *</label>
@@ -106,7 +134,7 @@ export default function NewDatasetPage() {
           <button type="button" onClick={() => router.back()} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
           <button type="submit" disabled={submitting} className="inline-flex items-center gap-2 rounded-lg bg-[#12679a] px-4 py-2 text-sm font-bold text-white hover:bg-[#0d527d] disabled:opacity-50">
             {submitting && <LoaderCircle className="h-4 w-4 animate-spin" />}
-            Continue to Upload
+            {sourceUrl.trim() ? "Save Submission" : "Continue to Upload"}
           </button>
         </div>
       </form>

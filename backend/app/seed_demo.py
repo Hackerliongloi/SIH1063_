@@ -80,7 +80,7 @@ def seed() -> dict[str, int]:
                 type=item["type"], title=item["title"], description=item["description"],
                 expedition_id=expeditions[item["expedition"]].id if item.get("expedition") else None,
                 region=item.get("region"), station=item.get("station"), year=item.get("year"), external_url=item["url"],
-                processing_status="ready", review_status="approved", created_by=admin.id if admin else None, metadata_json=metadata,
+                processing_status="ready", review_status="approved", access_level="public", created_by=admin.id if admin else None, metadata_json=metadata,
             )
             db.add(row)
             db.flush()

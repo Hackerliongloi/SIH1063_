@@ -264,6 +264,10 @@ export const api = {
     theme?: string;
     formats: string[];
     tone: string;
+    audience?: string;
+    reading_level?: string;
+    max_length?: number;
+    key_messages?: string;
   }) => {
     const result = await fetchFromAPI("/generate", {
       method: "POST",

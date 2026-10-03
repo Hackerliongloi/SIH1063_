@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 
-type AssetRecord = { id: string | number; title: string; type?: string; region?: string; year?: number | string; version?: number | string; status?: string; review_status?: string; error?: string | null; };
+type AssetRecord = { id: string | number; title: string; type?: string; region?: string; year?: number | string; record_date?: string; authors?: string[]; tags?: string[]; access_level?: string; version?: number | string; status?: string; review_status?: string; error?: string | null; };
 type ExpeditionRecord = { id: string | number; name: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -49,6 +49,13 @@ export default function AdminContentPage() {
   const [uploadRegion, setUploadRegion] = useState("Antarctic");
   const [uploadYear, setUploadYear] = useState(2024);
   const [uploadType, setUploadType] = useState("report");
+  const [uploadDate, setUploadDate] = useState("");
+  const [uploadAuthors, setUploadAuthors] = useState("");
+  const [uploadTags, setUploadTags] = useState("");
+  const [uploadAccess, setUploadAccess] = useState("internal");
+  const [uploadExternalUrl, setUploadExternalUrl] = useState("");
+  const [reportNumber, setReportNumber] = useState("");
+  const [photoCredit, setPhotoCredit] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [deletingAssetId, setDeletingAssetId] = useState<string | number | null>(null);
@@ -152,22 +159,29 @@ export default function AdminContentPage() {
 
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedFile) {
-      setUploadMessage("Error: Please select a file to add to the repository.");
+    if (!selectedFile && !uploadExternalUrl.trim()) {
+      setUploadMessage("Error: Select a file or provide an HTTPS source link.");
       return;
     }
+    if (selectedFile && uploadExternalUrl.trim()) { setUploadMessage("Error: Provide either a file or an HTTPS source link, not both."); return; }
 
     setUploading(true);
     setUploadMessage(null);
     try {
       const formData = new FormData();
-      formData.append("file", selectedFile);
+      if (selectedFile) formData.append("file", selectedFile);
       if (uploadTitle) formData.append("title", uploadTitle);
       if (uploadDescription) formData.append("description", uploadDescription);
       if (uploadExpeditionId) formData.append("expedition_id", uploadExpeditionId);
       if (uploadRegion) formData.append("region", uploadRegion);
       if (uploadYear) formData.append("year", uploadYear.toString());
       if (uploadType) formData.append("type", uploadType);
+      if (uploadDate) formData.append("record_date", uploadDate);
+      formData.append("authors", JSON.stringify(uploadAuthors.split(",").map((v) => v.trim()).filter(Boolean)));
+      formData.append("tags", JSON.stringify(uploadTags.split(",").map((v) => v.trim()).filter(Boolean)));
+      formData.append("access_level", uploadAccess);
+      formData.append("external_url", uploadExternalUrl.trim());
+      formData.append("type_details", JSON.stringify(uploadType === "report" ? { report_number: reportNumber } : uploadType === "photo" ? { photographer: photoCredit } : {}));
 
       const res = await fetch("/api/ingest/upload", {
         method: "POST",
@@ -184,6 +198,7 @@ export default function AdminContentPage() {
       setSelectedFile(null);
       setUploadTitle("");
       setUploadDescription("");
+      setUploadDate(""); setUploadAuthors(""); setUploadTags(""); setUploadExternalUrl(""); setReportNumber(""); setPhotoCredit("");
       setMobileUploadModalOpen(false);
       await loadData();
     } catch (err: unknown) {
@@ -263,7 +278,8 @@ export default function AdminContentPage() {
                     >
                       {a.title}
                     </Link>
-                    <span className="block text-xs text-slate-500">Record ID {a.id}</span>
+                    <span className="block text-xs text-slate-500">Record ID {a.id} · {a.record_date || "Date not specified"} · {a.access_level || "internal"}</span>
+                    <span className="block max-w-xs truncate text-xs text-slate-500" title={[...(a.authors || []), ...(a.tags || [])].join(", ")}>{[...(a.authors || []), ...(a.tags || [])].join(" · ")}</span>
                   </td>
                   <td className="px-5 py-4">
                     <span className="rounded-full border border-sky-900 bg-sky-50/50 px-2.5 py-1 text-xs font-medium capitalize text-sky-800">{a.type || "Resource"}</span>
@@ -325,7 +341,7 @@ export default function AdminContentPage() {
       {/* Upload Ingestion Modal */}
       {uploadModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-          <div className="w-full max-w-lg space-y-5 rounded-2xl border border-slate-300 bg-white p-5 shadow-2xl sm:p-7">
+          <div className="max-h-[92vh] w-full max-w-2xl space-y-5 overflow-y-auto rounded-2xl border border-slate-300 bg-white p-5 shadow-2xl sm:p-7">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <span className="flex items-center gap-2 text-base font-bold text-[#143b5e]">
                 <UploadCloud className="w-5 h-5 text-[#12679a]" />
@@ -344,15 +360,15 @@ export default function AdminContentPage() {
               {uploadMessage?.startsWith("Error:") && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{uploadMessage}</p>}
               {/* File input */}
               <div className="space-y-1.5">
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-600">Select a file <span className="font-normal text-slate-500">(PDF, CSV, NC, image, video)</span></label>
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-600">Source file <span className="font-normal text-slate-500">(or enter an HTTPS link below)</span></label>
                 <input
                   type="file"
                   onChange={handleFileChange}
                   accept=".pdf,.docx,.csv,.nc,.jpg,.jpeg,.png,.mp4,.txt"
-                  required
                   className="w-full cursor-pointer rounded-lg border border-slate-300 bg-[#f5f8fb] p-2 text-sm text-slate-600 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-sky-700 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white hover:file:bg-sky-600"
                 />
               </div>
+              <div className="space-y-1.5"><label className="mb-1.5 block text-xs font-semibold text-slate-600">External HTTPS source (optional)</label><input type="url" value={uploadExternalUrl} onChange={(e) => setUploadExternalUrl(e.target.value)} placeholder="https://..." className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm" /></div>
 
               {/* Title */}
               <div className="space-y-1.5">
@@ -383,7 +399,7 @@ export default function AdminContentPage() {
                 <div className="space-y-1.5">
                   <label className="mb-1.5 block text-xs font-semibold text-slate-600">Resource type</label>
                   <select value={uploadType} onChange={(e) => setUploadType(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-[#f5f8fb] px-3 py-2 text-sm text-[#143b5e] focus:border-sky-500 focus:outline-none">
-                    <option value="report">Report</option><option value="dataset">Dataset</option><option value="publication">Publication</option><option value="photo">Photograph</option><option value="video">Video</option>
+                    <option value="report">Report</option><option value="dataset">Dataset</option><option value="publication">Publication</option><option value="photo">Photograph</option><option value="video">Video</option><option value="activity">Research activity</option>
                   </select>
                 </div>
                 {/* Region */}
@@ -414,6 +430,14 @@ export default function AdminContentPage() {
                   />
                 </div>
               </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div><label className="mb-1.5 block text-xs font-semibold text-slate-600">Record date</label><input type="date" value={uploadDate} onChange={(e) => setUploadDate(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm" /></div>
+                <div><label className="mb-1.5 block text-xs font-semibold text-slate-600">Access</label><select value={uploadAccess} onChange={(e) => setUploadAccess(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"><option value="internal">Internal</option><option value="public">Public after approval</option></select></div>
+              </div>
+              <div><label className="mb-1.5 block text-xs font-semibold text-slate-600">Author(s), comma separated</label><input value={uploadAuthors} onChange={(e) => setUploadAuthors(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm" /></div>
+              <div><label className="mb-1.5 block text-xs font-semibold text-slate-600">Tags / keywords, comma separated</label><input value={uploadTags} onChange={(e) => setUploadTags(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm" /></div>
+              {uploadType === "report" && <div><label className="mb-1.5 block text-xs font-semibold text-slate-600">Report number (optional)</label><input value={reportNumber} onChange={(e) => setReportNumber(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm" /></div>}
+              {uploadType === "photo" && <div><label className="mb-1.5 block text-xs font-semibold text-slate-600">Photographer / image credit (optional)</label><input value={photoCredit} onChange={(e) => setPhotoCredit(e.target.value)} className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm" /></div>}
 
               {/* Expedition */}
               <div className="space-y-1.5">
