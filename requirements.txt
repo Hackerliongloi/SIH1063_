@@ -19,3 +19,4 @@ pandas==2.2.3
 xarray==2025.4.0
 Pillow==11.2.1
 httpx==0.28.1
+cloudinary==1.41.0

@@ -4,6 +4,15 @@ from .core.config import settings
 
 def store_file(data:bytes,suffix:str,content_type:str)->str:
     key=f"{hashlib.sha256(data).hexdigest()}.{suffix}"
+    if settings.cloudinary_url:
+        try:
+            import cloudinary, cloudinary.uploader, io
+            cloudinary.config(cloudinary_url=settings.cloudinary_url)
+            resource_type = "video" if content_type.startswith("video/") else ("image" if content_type.startswith("image/") else "raw")
+            result = cloudinary.uploader.upload(io.BytesIO(data), resource_type=resource_type, public_id=key.rsplit(".",1)[0], overwrite=True)
+            return result["secure_url"]
+        except Exception as exc:
+            logging.warning("Cloudinary upload failed, falling back: %s",exc)
     try:
         import boto3
         client=boto3.client("s3",endpoint_url=settings.storage_endpoint,aws_access_key_id=settings.storage_access_key,aws_secret_access_key=settings.storage_secret_key,region_name=settings.storage_region)
@@ -16,9 +25,15 @@ def store_file(data:bytes,suffix:str,content_type:str)->str:
         return f"local:{key}"
     return key
 
+def _is_remote(key:str)->bool:
+    return key.startswith("http://") or key.startswith("https://")
+
 def read_file(key:str)->bytes:
     if key.startswith("local:"):
         return (Path(os.getenv("LOCAL_MEDIA_DIR","./media"))/key.removeprefix("local:")).read_bytes()
+    if _is_remote(key):
+        import urllib.request
+        return urllib.request.urlopen(key).read()
     import boto3
     client=boto3.client("s3",endpoint_url=settings.storage_endpoint,aws_access_key_id=settings.storage_access_key,aws_secret_access_key=settings.storage_secret_key,region_name=settings.storage_region)
     return client.get_object(Bucket=settings.storage_bucket,Key=key)["Body"].read()
@@ -26,6 +41,14 @@ def read_file(key:str)->bytes:
 def file_size(key:str)->int:
     if key.startswith("local:"):
         return (Path(os.getenv("LOCAL_MEDIA_DIR","./media"))/key.removeprefix("local:")).stat().st_size
+    if _is_remote(key):
+        import urllib.request
+        req=urllib.request.Request(key,method="HEAD")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return int(resp.headers.get("Content-Length",0))
+        except Exception:
+            return len(read_file(key))
     import boto3
     client=boto3.client("s3",endpoint_url=settings.storage_endpoint,aws_access_key_id=settings.storage_access_key,aws_secret_access_key=settings.storage_secret_key,region_name=settings.storage_region)
     return int(client.head_object(Bucket=settings.storage_bucket,Key=key)["ContentLength"])
@@ -42,6 +65,19 @@ def stream_file(key:str,start:int,end:int):
                     if not chunk:break
                     remaining-=len(chunk);yield chunk
         return local_chunks()
+    if _is_remote(key):
+        import urllib.request
+        def remote_chunks():
+            req=urllib.request.Request(key,headers={"Range":f"bytes={start}-{end}"})
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    while True:
+                        chunk=resp.read(1024*1024)
+                        if not chunk:break
+                        yield chunk
+            except Exception:
+                yield read_file(key)[start:end+1]
+        return remote_chunks()
     import boto3
     client=boto3.client("s3",endpoint_url=settings.storage_endpoint,aws_access_key_id=settings.storage_access_key,aws_secret_access_key=settings.storage_secret_key,region_name=settings.storage_region)
     body=client.get_object(Bucket=settings.storage_bucket,Key=key,Range=f"bytes={start}-{end}")["Body"]

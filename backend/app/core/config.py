@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     storage_secret_key: str = "polar-local-secret"
     storage_bucket: str = "polar-assets"
     storage_region: str = "us-east-1"
+    cloudinary_url: str = ""
     llm_provider: str = "fake"
     model_name: str = "local-fake"
     model_base_url: str = ""
