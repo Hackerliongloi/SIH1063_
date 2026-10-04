@@ -56,6 +56,7 @@ async function forward(request: NextRequest, path: string[], method: string) {
     if (range) headers.set("range", range);
     const ifRange = request.headers.get("if-range");
     if (ifRange) headers.set("if-range", ifRange);
+    headers.set("accept-encoding", "identity");
     if (token) headers.set("authorization", `Bearer ${token}`);
     
     // In Node 18+, fetch with ReadableStream requires duplex: "half"
@@ -98,7 +99,7 @@ async function forward(request: NextRequest, path: string[], method: string) {
   }
 
   const response = new NextResponse(upstream.body, { status: upstream.status });
-  for (const header of ["content-type", "content-length", "content-range", "accept-ranges", "content-disposition", "etag", "last-modified"]) {
+  for (const header of ["content-type", "content-range", "accept-ranges", "content-disposition", "etag", "last-modified"]) {
     const value = upstream.headers.get(header);
     if (value) response.headers.set(header, value);
   }
