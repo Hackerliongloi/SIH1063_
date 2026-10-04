@@ -143,15 +143,28 @@ export default function AssetDetailPage() {
             Synthesize Grounded Story in Studio
           </Link>
 
-          {asset.file_key ? <a
-            href={getMediaUrl(asset.file_key) || undefined}
-            target="_blank"
-            rel="noreferrer"
+          {asset.file_key ? <button
+            onClick={async () => {
+              try {
+                const url = getMediaUrl(asset.file_key);
+                if (!url) return;
+                const res = await fetch(url);
+                const blob = await res.blob();
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                const ext = (asset.file_key || "").split(".").pop() || "bin";
+                a.download = `${asset.title || "asset"}.${ext}`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(a.href);
+              } catch { window.open(getMediaUrl(asset.file_key) || "#", "_blank"); }
+            }}
             className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-medium flex items-center gap-2"
           >
             <Download className="w-3.5 h-3.5 text-[#12679a]" />
             Download Source File
-          </a> : asset.external_url ? <a href={asset.external_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><ExternalLink className="h-4 w-4 text-[#12679a]" />Open source resource</a> : <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-500"><Download className="h-4 w-4" />Source file unavailable</span>}
+          </button> : asset.external_url ? <a href={asset.external_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><ExternalLink className="h-4 w-4 text-[#12679a]" />Open source resource</a> : <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-500"><Download className="h-4 w-4" />Source file unavailable</span>}
 
           <a href={`/api/assets/${asset.id}/export/pdf`} className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-medium flex items-center gap-2">
             <FileText className="w-3.5 h-3.5 text-red-600" />
