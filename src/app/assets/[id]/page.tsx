@@ -33,6 +33,7 @@ export default function AssetDetailPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"text" | "metadata" | "versions">("text");
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     async function loadAsset() {
@@ -144,7 +145,9 @@ export default function AssetDetailPage() {
           </Link>
 
           {asset.file_key ? <button
+            disabled={downloading}
             onClick={async () => {
+              setDownloading(true);
               try {
                 const url = getMediaUrl(asset.file_key);
                 if (!url) return;
@@ -159,11 +162,12 @@ export default function AssetDetailPage() {
                 a.remove();
                 URL.revokeObjectURL(a.href);
               } catch { window.open(getMediaUrl(asset.file_key) || "#", "_blank"); }
+              finally { setDownloading(false); }
             }}
-            className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-medium flex items-center gap-2"
+            className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-medium flex items-center gap-2 cursor-pointer disabled:cursor-wait disabled:opacity-60"
           >
             <Download className="w-3.5 h-3.5 text-[#12679a]" />
-            Download Source File
+            {downloading ? "Downloading..." : "Download Source File"}
           </button> : asset.external_url ? <a href={asset.external_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><ExternalLink className="h-4 w-4 text-[#12679a]" />Open source resource</a> : <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-500"><Download className="h-4 w-4" />Source file unavailable</span>}
 
           <a href={`/api/assets/${asset.id}/export/pdf`} className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-medium flex items-center gap-2">
