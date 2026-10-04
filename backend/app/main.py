@@ -11,7 +11,7 @@ from .core.config import settings
 from .core.db import Base, engine, get_db, SessionLocal
 from .core.security import hash_password, verify_password, token_for, current_user, require_roles
 from .models import *
-from .services import store_file, enqueue_ingestion, extract_text, file_size, stream_file
+from .services import store_file, enqueue_ingestion, extract_text, file_size, stream_file, build_asset_index_text
 from .embeddings import embed, cosine
 from .providers import generate_locally, generate_openrouter
 from pgvector.sqlalchemy import Vector
@@ -150,7 +150,8 @@ SOCIAL_FEED_KIND={"post":"post","carousel":"carousel","reel":"reel","instagram":
 def serialize_asset(a):
     metadata=dict(a.metadata_json or {})
     metadata.pop("_ingestion_job_id",None)
-    return {"id":a.id,"type":a.type,"title":a.title,"description":a.description,"expedition_id":a.expedition_id,"expedition":a.expedition.name if a.expedition else None,"region":a.region,"station":a.station,"year":a.year,"record_date":a.record_date.isoformat() if a.record_date else None,"authors":a.authors or [],"access_level":getattr(a,"access_level","public"),"tags":[tag.name for tag in getattr(a,"tags",[])],"type_details":metadata.get("type_details",{}),"file_key":a.file_key,"thumb_key":a.thumb_key,"external_url":a.external_url,"status":a.processing_status,"review_status":a.review_status,"error":a.error,"version":a.version,"metadata":metadata,"created_at":a.created_at.isoformat() if a.created_at else None}
+    index_mode=metadata.pop("_index_mode",None)
+    return {"id":a.id,"type":a.type,"title":a.title,"description":a.description,"expedition_id":a.expedition_id,"expedition":a.expedition.name if a.expedition else None,"region":a.region,"station":a.station,"year":a.year,"record_date":a.record_date.isoformat() if a.record_date else None,"authors":a.authors or [],"access_level":getattr(a,"access_level","public"),"tags":[tag.name for tag in getattr(a,"tags",[])],"type_details":metadata.get("type_details",{}),"index_mode":index_mode,"file_key":a.file_key,"thumb_key":a.thumb_key,"external_url":a.external_url,"status":a.processing_status,"review_status":a.review_status,"error":a.error,"version":a.version,"metadata":metadata,"created_at":a.created_at.isoformat() if a.created_at else None}
 
 def apply_asset_tags(db:Session, asset:Asset, names:list[str]):
     db.query(AssetTag).filter(AssetTag.asset_id==asset.id).delete(synchronize_session=False)
@@ -163,7 +164,12 @@ def asset_metadata(existing:dict|None, details:dict|None):
     result=dict(existing or {})
     result["type_details"]=dict(details or {})
     return result
-def serialize_draft(d, webhook_delivery_status=None, query_webhook_status=True):
+
+def index_asset_metadata(db:Session, asset:Asset):
+    index_text,index_mode=build_asset_index_text(asset,"")
+    db.add(Chunk(asset_id=asset.id,idx=0,text=index_text,embedding=embed(index_text)))
+    asset.metadata_json={**(asset.metadata_json or {}),"_index_mode":index_mode}
+def serialize_draft(d, webhook_delivery_status=None, query_webhook_status=True, include_linked_content=False):
     from sqlalchemy.orm import object_session
     db = object_session(d)
     public_story_id = d.id if d.kind == "article" else None
@@ -174,7 +180,15 @@ def serialize_draft(d, webhook_delivery_status=None, query_webhook_status=True):
         if story is not None:
             public_story_id = story
         else:
-            public_story_id = db.scalar(select(FeedItem.id).where(FeedItem.origin_draft_id == d.id).limit(1))
+            linked_item = db.scalar(select(FeedItem).where(FeedItem.origin_draft_id == d.id).limit(1))
+            public_story_id = linked_item.id if linked_item else None
+    linked_content = None
+    if include_linked_content and db and d.kind in SOCIAL_DRAFT_KINDS:
+        from .modules.feed import FeedItem, item_json
+        from sqlalchemy import select
+        linked_item = db.scalar(select(FeedItem).where(FeedItem.origin_draft_id == d.id).limit(1))
+        if linked_item:
+            linked_content = item_json(linked_item, include_internal=True)
     if query_webhook_status and db and d.kind in SOCIAL_DRAFT_KINDS:
         from .models import WebhookOutbox
         from .modules.feed import FeedItem
@@ -183,7 +197,7 @@ def serialize_draft(d, webhook_delivery_status=None, query_webhook_status=True):
         if linked:
             outbox = db.scalar(select(WebhookOutbox).where(WebhookOutbox.feed_item_id==linked.id).order_by(WebhookOutbox.created_at.desc()))
             if outbox: webhook_delivery_status = {"id": outbox.id, "state": outbox.state, "attempts": outbox.attempts, "last_error": outbox.last_error}
-    return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"audience":d.audience,"reading_level":d.reading_level,"max_length":d.max_length,"key_messages":d.key_messages,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at,"public_story_id":public_story_id,"webhook_delivery_status":webhook_delivery_status}
+    return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"audience":d.audience,"reading_level":d.reading_level,"max_length":d.max_length,"key_messages":d.key_messages,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at,"public_story_id":public_story_id,"webhook_delivery_status":webhook_delivery_status,"linked_content":linked_content}
 def serialize_public_draft(d,db):
     sources=[]
     for citation in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==d.id)):
@@ -333,6 +347,7 @@ def add_asset(data:AssetIn,db:Session=Depends(get_db),u=Depends(require_roles("a
     if data.type_details and data.type not in {"report","photo"}: raise HTTPException(422,"Type-specific details are supported for reports and photos")
     a=Asset(**data.model_dump(exclude={"tags","metadata","type_details"}),metadata_json=asset_metadata(data.metadata,data.type_details),created_by=u.id,processing_status="ready",review_status="approved");db.add(a);db.flush()
     apply_asset_tags(db,a,data.tags)
+    if data.external_url: index_asset_metadata(db,a)
     db.add(AssetVersion(asset_id=a.id,version=1,snapshot_json=data.model_dump(mode="json")));db.commit();db.refresh(a);return serialize_asset(a)
 @app.get("/api/assets/{aid}")
 def get_asset(aid:int,db:Session=Depends(get_db),u=Depends(current_user)):
@@ -426,6 +441,8 @@ def update_asset(aid:int,data:dict,db:Session=Depends(get_db),u=Depends(require_
     if "tags" in data:
         if not isinstance(data["tags"],list): raise HTTPException(422,"tags must be a list")
         apply_asset_tags(db,a,data["tags"])
+    if a.external_url and not a.file_key and any(key in data for key in {"title","description","region","station","year","record_date","authors","tags","type_details"}):
+        db.query(Chunk).filter(Chunk.asset_id==a.id).delete(synchronize_session=False);index_asset_metadata(db,a)
     a.version+=1;a.updated_at=now();db.add(AssetVersion(asset_id=a.id,version=a.version,snapshot_json=serialize_asset(a)));db.commit();db.refresh(a);return serialize_asset(a)
 @app.delete("/api/assets/{aid}",status_code=204)
 def delete_asset(aid:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
@@ -450,7 +467,7 @@ async def upload(file:UploadFile|None=File(None),title:str=Form(...),type:str=Fo
     if bool(file)==bool(validated.external_url): raise HTTPException(422,"Provide exactly one source: an uploaded file or an HTTPS external link")
     if not file:
         a=Asset(type=type,title=title,description=description,expedition_id=expedition_id,station=station,region=region,year=year,record_date=record_date,authors=validated.authors,access_level=access_level,external_url=validated.external_url,processing_status="ready",review_status="approved",created_by=u.id,metadata_json=asset_metadata({},details_data))
-        db.add(a);db.flush();apply_asset_tags(db,a,validated.tags);db.add(AssetVersion(asset_id=a.id,version=1,snapshot_json=validated.model_dump(mode="json")));db.commit();db.refresh(a)
+        db.add(a);db.flush();apply_asset_tags(db,a,validated.tags);index_asset_metadata(db,a);db.add(AssetVersion(asset_id=a.id,version=1,snapshot_json=validated.model_dump(mode="json")));db.commit();db.refresh(a)
         return {"asset":serialize_asset(a),"job_queued":False}
     suffix=(file.filename or "").lower().rsplit(".",1)[-1] if "." in (file.filename or "") else ""
     allowed={"pdf","docx","csv","nc","nc4","jpg","jpeg","png","webp","tif","tiff","mp4","txt"}
@@ -469,12 +486,11 @@ async def upload(file:UploadFile|None=File(None),title:str=Form(...),type:str=Fo
         db.commit()
     else:
         try:
-            text=extract_text(data,suffix)
-            if text:
-                for i in range(0,len(text),2500):
-                    chunk_text=text[i:i+3000]
-                    db.add(Chunk(asset_id=a.id,idx=i//2500,text=chunk_text,embedding=embed(chunk_text)))
-            a.processing_status="ready";a.error=None;a.updated_at=now();db.commit()
+            text=extract_text(data,suffix);index_text,index_mode=build_asset_index_text(a,text)
+            for i in range(0,len(index_text),2500):
+                chunk_text=index_text[i:i+3000]
+                db.add(Chunk(asset_id=a.id,idx=i//2500,text=chunk_text,embedding=embed(chunk_text)))
+            a.metadata_json={**(a.metadata_json or {}),"_index_mode":index_mode};a.processing_status="ready";a.error=None;a.updated_at=now();db.commit()
         except Exception as e:
             db.rollback();a=db.get(Asset,a.id)
             if a:a.processing_status="failed";a.error=str(e)[:1000];a.updated_at=now();db.commit()
@@ -486,8 +502,13 @@ def failed_ingestion(db:Session=Depends(get_db),u=Depends(require_roles("admin",
 def retry_ingestion(asset_id:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     a=db.scalar(select(Asset).where(Asset.id==asset_id).with_for_update().execution_options(populate_existing=True))
     if not a:raise HTTPException(404,"Asset not found")
-    if a.processing_status!="failed":raise HTTPException(409,"Only failed assets can be retried")
-    if not a.file_key:raise HTTPException(422,"Asset has no source file")
+    if a.processing_status not in {"failed","ready"}:raise HTTPException(409,"Only failed assets or ready records without indexed text can be retried")
+    if a.processing_status=="ready" and (db.scalar(select(func.count(Chunk.id)).where(Chunk.asset_id==a.id)) or 0)>0:raise HTTPException(409,"This record already has indexed text")
+    if not a.file_key:
+        if not a.external_url:raise HTTPException(422,"Asset has no source file or HTTPS link")
+        db.query(Chunk).filter(Chunk.asset_id==a.id).delete(synchronize_session=False)
+        index_asset_metadata(db,a);a.processing_status="ready";a.error=None;a.updated_at=now();db.commit()
+        return {"asset_id":a.id,"status":a.processing_status,"review_status":a.review_status,"queued":False}
     suffix=(a.metadata_json or {}).get("filename","").lower().rsplit(".",1)[-1]
     a.processing_status="processing";a.error=None;a.updated_at=now();db.commit()
     ingestion_job_id=enqueue_ingestion(a.id,a.file_key,suffix)
@@ -574,7 +595,7 @@ def create_draft(data:DraftIn,db:Session=Depends(get_db),u=Depends(require_roles
 def draft_detail(did:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):
     d=db.get(Draft,did)
     if not d:raise HTTPException(404,"Draft not found")
-    return {**serialize_draft(d),"citations":[{"claim_text":c.claim_text,"chunk_id":c.chunk_id,"asset_id":c.asset_id,"span_text":c.span_text,"supported":c.supported} for c in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==did))],"comments":[{"author_id":c.author_id,"body":c.body,"action":c.action,"created_at":c.created_at} for c in db.scalars(select(DraftComment).where(DraftComment.draft_id==did))]}
+    return {**serialize_draft(d, include_linked_content=True),"citations":[{"claim_text":c.claim_text,"chunk_id":c.chunk_id,"asset_id":c.asset_id,"span_text":c.span_text,"supported":c.supported} for c in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==did))],"comments":[{"author_id":c.author_id,"body":c.body,"action":c.action,"created_at":c.created_at} for c in db.scalars(select(DraftComment).where(DraftComment.draft_id==did))]}
 @app.delete("/api/editorial/drafts/{did}",status_code=204)
 def delete_draft(did:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     d=db.get(Draft,did)
@@ -667,16 +688,16 @@ def generate_sources(db:Session=Depends(get_db),u=Depends(require_roles("admin",
         select(Asset,func.count(Chunk.id).label("chunk_count"))
         .outerjoin(Chunk,Chunk.asset_id==Asset.id)
         .where(
-            Asset.processing_status=="ready",
+            Asset.processing_status.in_({"ready","processing","failed"}),
             Asset.review_status.in_({"approved", "in_review", "draft"}),
         )
         .group_by(Asset.id)
-        .order_by(Asset.created_at.desc())
+        .order_by(func.count(Chunk.id).desc(),Asset.created_at.desc())
         .limit(100)
     ).all()
     return [{"id":asset.id,"title":asset.title,"type":asset.type,"region":asset.region,
              "year":asset.year,"expedition_id":asset.expedition_id,
-             "record_date":asset.record_date.isoformat() if asset.record_date else None,"authors":asset.authors or [],"tags":[tag.name for tag in asset.tags],"review_status":asset.review_status,"access_level":asset.access_level,"chunk_count":chunk_count}
+             "record_date":asset.record_date.isoformat() if asset.record_date else None,"authors":asset.authors or [],"tags":[tag.name for tag in asset.tags],"review_status":asset.review_status,"access_level":asset.access_level,"status":asset.processing_status,"has_source":bool(asset.file_key or asset.external_url),"index_mode":(asset.metadata_json or {}).get("_index_mode"),"index_error":asset.error,"chunk_count":chunk_count}
             for asset,chunk_count in rows]
 
 @app.post("/api/generate")
@@ -713,7 +734,12 @@ def generate(payload:dict,db:Session=Depends(get_db),u=Depends(require_roles("ad
     elif payload.get("theme"):stmt=stmt.where(or_(Asset.title.ilike(f"%{payload['theme']}%"),Chunk.text.ilike(f"%{payload['theme']}%")))
     else:raise HTTPException(422,"Provide asset_ids, expedition_id, or theme")
     rows=db.execute(stmt.order_by(Asset.id,Chunk.idx,Chunk.id).limit(12)).all()
-    if not rows:raise HTTPException(422,"No indexed text chunks found for the selected sources. Confirm indexing is complete and the records contain extractable text; draft and in-review records are supported.")
+    if not rows:
+        if ids:
+            counts=db.execute(select(Asset.id,Asset.title,Asset.processing_status,func.count(Chunk.id)).outerjoin(Chunk,Chunk.asset_id==Asset.id).where(Asset.id.in_(ids)).group_by(Asset.id)).all()
+            details="; ".join(f"{title} (status: {status}, indexed chunks: {count})" for _,title,status,count in counts)
+            raise HTTPException(422,f"None of the selected sources has indexed text. Check that processing is complete and the source has extractable text. Selected: {details or 'records not found'}.")
+        raise HTTPException(422,"No indexed text chunks found for the requested expedition or topic. Check that source indexing is complete.")
     citations=[]; snippets=[]
     for i,(c,a) in enumerate(rows,1):
         excerpt=c.text[:700];snippets.append(f"[{i}] {excerpt}");citations.append((c,a))
@@ -828,6 +854,7 @@ def create_dataset_draft(data:AssetIn,db:Session=Depends(get_db),u=Depends(requi
     if data.type_details and data.type not in {"report","photo"}: raise HTTPException(422,"Type-specific details are supported for reports and photos")
     a=Asset(**data.model_dump(exclude={"tags","metadata","type_details"}),metadata_json=asset_metadata(data.metadata,data.type_details),created_by=u.id,processing_status="ready",review_status="draft")
     db.add(a);db.flush();apply_asset_tags(db,a,data.tags)
+    if data.external_url: index_asset_metadata(db,a)
     db.add(AssetVersion(asset_id=a.id,version=1,snapshot_json=data.model_dump(mode="json")))
     db.commit();db.refresh(a)
     return serialize_asset(a)
@@ -850,6 +877,8 @@ def update_submitter_dataset(id:int,data:dict,db:Session=Depends(get_db),u=Depen
         setattr(a,key,getattr(validated,key))
     a.metadata_json=asset_metadata(a.metadata_json,validated.type_details);a.version+=1;a.updated_at=now()
     apply_asset_tags(db,a,validated.tags)
+    if a.external_url and not a.file_key:
+        db.query(Chunk).filter(Chunk.asset_id==a.id).delete(synchronize_session=False);index_asset_metadata(db,a)
     db.add(AssetVersion(asset_id=a.id,version=a.version,snapshot_json=validated.model_dump(mode="json")))
     db.commit();db.refresh(a);return serialize_asset(a)
 
@@ -884,13 +913,13 @@ async def upload_dataset_file(id:int,file:UploadFile=File(...),db:Session=Depend
     else:
         try:
             text=extract_text(data,suffix)
-            if text:
-                for i in range(0,len(text),2500):
-                    chunk_text=text[i:i+3000]
-                    db.add(Chunk(asset_id=a.id,idx=i//2500,text=chunk_text,embedding=embed(chunk_text)))
+            index_text,index_mode=build_asset_index_text(a,text)
+            for i in range(0,len(index_text),2500):
+                chunk_text=index_text[i:i+3000]
+                db.add(Chunk(asset_id=a.id,idx=i//2500,text=chunk_text,embedding=embed(chunk_text)))
             # Even formats without extractable text (for example some media files)
             # completed ingestion successfully and must not remain in "processing".
-            a.processing_status="ready";a.review_status="draft";a.error=None;a.updated_at=now();db.commit()
+            a.metadata_json={**(a.metadata_json or {}),"_index_mode":index_mode};a.processing_status="ready";a.review_status="draft";a.error=None;a.updated_at=now();db.commit()
         except Exception as e:
             db.rollback();a=db.get(Asset,id)
             if a:a.processing_status="failed";a.error=str(e)[:1000];a.updated_at=now();db.commit()
