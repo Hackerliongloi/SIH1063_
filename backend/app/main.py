@@ -169,7 +169,7 @@ def index_asset_metadata(db:Session, asset:Asset):
     index_text,index_mode=build_asset_index_text(asset,"")
     db.add(Chunk(asset_id=asset.id,idx=0,text=index_text,embedding=embed(index_text)))
     asset.metadata_json={**(asset.metadata_json or {}),"_index_mode":index_mode}
-def serialize_draft(d, webhook_delivery_status=None, query_webhook_status=True):
+def serialize_draft(d, webhook_delivery_status=None, query_webhook_status=True, include_linked_content=False):
     from sqlalchemy.orm import object_session
     db = object_session(d)
     public_story_id = d.id if d.kind == "article" else None
@@ -180,7 +180,15 @@ def serialize_draft(d, webhook_delivery_status=None, query_webhook_status=True):
         if story is not None:
             public_story_id = story
         else:
-            public_story_id = db.scalar(select(FeedItem.id).where(FeedItem.origin_draft_id == d.id).limit(1))
+            linked_item = db.scalar(select(FeedItem).where(FeedItem.origin_draft_id == d.id).limit(1))
+            public_story_id = linked_item.id if linked_item else None
+    linked_content = None
+    if include_linked_content and db and d.kind in SOCIAL_DRAFT_KINDS:
+        from .modules.feed import FeedItem, item_json
+        from sqlalchemy import select
+        linked_item = db.scalar(select(FeedItem).where(FeedItem.origin_draft_id == d.id).limit(1))
+        if linked_item:
+            linked_content = item_json(linked_item, include_internal=True)
     if query_webhook_status and db and d.kind in SOCIAL_DRAFT_KINDS:
         from .models import WebhookOutbox
         from .modules.feed import FeedItem
@@ -189,7 +197,7 @@ def serialize_draft(d, webhook_delivery_status=None, query_webhook_status=True):
         if linked:
             outbox = db.scalar(select(WebhookOutbox).where(WebhookOutbox.feed_item_id==linked.id).order_by(WebhookOutbox.created_at.desc()))
             if outbox: webhook_delivery_status = {"id": outbox.id, "state": outbox.state, "attempts": outbox.attempts, "last_error": outbox.last_error}
-    return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"audience":d.audience,"reading_level":d.reading_level,"max_length":d.max_length,"key_messages":d.key_messages,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at,"public_story_id":public_story_id,"webhook_delivery_status":webhook_delivery_status}
+    return {"id":d.id,"kind":d.kind,"title":d.title,"body_md":d.body_md,"tone":d.tone,"audience":d.audience,"reading_level":d.reading_level,"max_length":d.max_length,"key_messages":d.key_messages,"status":d.status,"ai_assisted":d.ai_assisted,"expedition_id":d.expedition_id,"scheduled_at":d.scheduled_at,"approved_at":d.approved_at,"published_at":d.published_at,"reviewer_id":d.reviewer_id,"created_at":d.created_at,"updated_at":d.updated_at,"public_story_id":public_story_id,"webhook_delivery_status":webhook_delivery_status,"linked_content":linked_content}
 def serialize_public_draft(d,db):
     sources=[]
     for citation in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==d.id)):
@@ -587,7 +595,7 @@ def create_draft(data:DraftIn,db:Session=Depends(get_db),u=Depends(require_roles
 def draft_detail(did:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor","reviewer"))):
     d=db.get(Draft,did)
     if not d:raise HTTPException(404,"Draft not found")
-    return {**serialize_draft(d),"citations":[{"claim_text":c.claim_text,"chunk_id":c.chunk_id,"asset_id":c.asset_id,"span_text":c.span_text,"supported":c.supported} for c in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==did))],"comments":[{"author_id":c.author_id,"body":c.body,"action":c.action,"created_at":c.created_at} for c in db.scalars(select(DraftComment).where(DraftComment.draft_id==did))]}
+    return {**serialize_draft(d, include_linked_content=True),"citations":[{"claim_text":c.claim_text,"chunk_id":c.chunk_id,"asset_id":c.asset_id,"span_text":c.span_text,"supported":c.supported} for c in db.scalars(select(DraftCitation).where(DraftCitation.draft_id==did))],"comments":[{"author_id":c.author_id,"body":c.body,"action":c.action,"created_at":c.created_at} for c in db.scalars(select(DraftComment).where(DraftComment.draft_id==did))]}
 @app.delete("/api/editorial/drafts/{did}",status_code=204)
 def delete_draft(did:int,db:Session=Depends(get_db),u=Depends(require_roles("admin","editor"))):
     d=db.get(Draft,did)
