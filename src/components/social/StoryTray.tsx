@@ -1,5 +1,6 @@
 "use client";
 import React from 'react';
+import { getMediaUrl } from '@/lib/media';
 
 export function StoryTray({ stories, onStoryClick }: any) {
   if (!stories || stories.length === 0) return null;
@@ -22,7 +23,7 @@ export function StoryTray({ stories, onStoryClick }: any) {
                 <div className="w-full h-full rounded-full border-2 border-white overflow-hidden bg-slate-100">
                   {story.slides?.[0]?.asset_url || story.slides?.[0]?.thumb_key ? (
                     <img 
-                      src={story.slides[0].asset_url || `/api/storage/${story.slides[0].thumb_key || story.slides[0].file_key}`} 
+                      src={story.slides[0].asset_url || getMediaUrl(story.slides[0].thumb_key || story.slides[0].file_key)} 
                       alt={story.title} 
                       className="w-full h-full object-cover"
                     />

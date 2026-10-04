@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Play, Volume2, VolumeX, Heart, Share2, ChevronUp, ChevronDown } from 'lucide-react';
+import { getMediaUrl } from '@/lib/media';
 
 interface ReelViewerProps {
   initialItem: any;
@@ -203,7 +204,7 @@ function ReelItem({ item, isActive, isMuted, toggleMute, onShare, onPrev, onNext
     }
   };
 
-  const videoSrc = item.video_url || (item.mp4_key || item.primary_asset?.file_key ? `/api/storage/${item.mp4_key || item.primary_asset?.file_key}` : null);
+  const videoSrc = item.video_url || (item.mp4_key || item.primary_asset?.file_key ? getMediaUrl(item.mp4_key || item.primary_asset?.file_key) : null);
 
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-slate-900 text-white">

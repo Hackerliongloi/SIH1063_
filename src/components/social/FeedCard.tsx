@@ -53,7 +53,7 @@ export function FeedCard({ item, onLike, onShare, onStoryClick, onReelClick }: a
     ? getMediaUrl(item.slides?.[0]?.thumb_key || item.slides?.[0]?.file_key || item.slides?.[0]?.asset_url) 
     : getMediaUrl(item.poster_key || item.primary_asset?.thumb_key || item.primary_asset?.file_key || item.primary_asset?.external_url || item.media?.[0]?.thumb_key || item.media?.[0]?.file_key || item.media?.[0]?.external_url);
 
-  const videoUrl = isStory ? null : (item.video_url || (item.mp4_key ? `/api/storage/${item.mp4_key}` : null));
+  const videoUrl = isStory ? null : (item.video_url || (item.mp4_key ? getMediaUrl(item.mp4_key) : null));
   const hasMedia = !!(mediaUrl || videoUrl);
 
   const handleMediaClick = () => {

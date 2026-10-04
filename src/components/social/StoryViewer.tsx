@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, ChevronLeft, ChevronRight, Pause, Play, ExternalLink } from 'lucide-react';
+import { getMediaUrl } from '@/lib/media';
 
 interface Slide {
   id: number;
@@ -164,7 +165,7 @@ export function StoryViewer({ story, onClose }: StoryViewerProps) {
           {currentSlide.kind === 'video' && (currentSlide.asset_url || currentSlide.file_key) ? (
             <video
               ref={videoRef}
-              src={currentSlide.asset_url || `/api/storage/${currentSlide.file_key}`}
+              src={currentSlide.asset_url || getMediaUrl(currentSlide.file_key) || undefined}
               className="absolute inset-0 w-full h-full object-cover"
               playsInline
               autoPlay
@@ -173,7 +174,7 @@ export function StoryViewer({ story, onClose }: StoryViewerProps) {
             />
           ) : currentSlide.kind === 'image' && (currentSlide.asset_url || currentSlide.file_key) ? (
             <img
-              src={currentSlide.asset_url || `/api/storage/${currentSlide.file_key}`}
+              src={currentSlide.asset_url || getMediaUrl(currentSlide.file_key) || undefined}
               alt={currentSlide.alt_text || currentSlide.title}
               className="absolute inset-0 w-full h-full object-cover"
             />

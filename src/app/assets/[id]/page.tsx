@@ -144,7 +144,7 @@ export default function AssetDetailPage() {
           </Link>
 
           {asset.file_key ? <a
-            href={`/api/storage/${asset.file_key}`}
+            href={getMediaUrl(asset.file_key) || undefined}
             target="_blank"
             rel="noreferrer"
             className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-medium flex items-center gap-2"
